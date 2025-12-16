@@ -428,6 +428,93 @@
                  </widget>
                 </item>
                 <item>
+                 <widget class="QGroupBox" name="blackScreenWarningGroupBox">
+                  <property name="title">
+                   <string>Black Screen Warning</string>
+                  </property>
+                  <layout class="QFormLayout" name="formLayout_blackScreenWarning">
+                   <property name="fieldGrowthPolicy">
+                    <enum>QFormLayout::AllNonFixedFieldsGrow</enum>
+                   </property>
+                   <property name="labelAlignment">
+                    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                   </property>
+                   <property name="topMargin">
+                    <number>2</number>
+                   </property>
+                   <item row="0" column="0">
+                    <spacer name="horizontalSpacer_blackScreenWarning">
+                     <property name="orientation">
+                      <enum>Qt::Horizontal</enum>
+                     </property>
+                     <property name="sizeType">
+                      <enum>QSizePolicy::Fixed</enum>
+                     </property>
+                     <property name="sizeHint" stdset="0">
+                      <size>
+                       <width>170</width>
+                       <height>5</height>
+                      </size>
+                     </property>
+                    </spacer>
+                   </item>
+                   <item row="0" column="1">
+                    <widget class="QCheckBox" name="enableBlackScreenWarning">
+                     <property name="text">
+                      <string>Enable black screen warning</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="1" column="0">
+                    <widget class="QLabel" name="blackScreenSecondsLabel">
+                     <property name="text">
+                      <string>Trigger after (seconds)</string>
+                     </property>
+                     <property name="buddy">
+                      <cstring>blackScreenSeconds</cstring>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="1" column="1">
+                    <widget class="QSpinBox" name="blackScreenSeconds">
+                     <property name="minimum">
+                      <number>1</number>
+                     </property>
+                     <property name="maximum">
+                      <number>3600</number>
+                     </property>
+                     <property name="value">
+                      <number>10</number>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="2" column="0">
+                    <widget class="QLabel" name="blackScreenThresholdLabel">
+                     <property name="text">
+                      <string>Sensitivity (0-255)</string>
+                     </property>
+                     <property name="buddy">
+                      <cstring>blackScreenThreshold</cstring>
+                     </property>
+                    </widget>
+                   </item>
+                   <item row="2" column="1">
+                    <widget class="QSpinBox" name="blackScreenThreshold">
+                     <property name="minimum">
+                      <number>0</number>
+                     </property>
+                     <property name="maximum">
+                      <number>255</number>
+                     </property>
+                     <property name="value">
+                      <number>8</number>
+                     </property>
+                    </widget>
+                   </item>
+                  </layout>
+                 </widget>
+                </item>
+                <item>
                  <widget class="QGroupBox" name="groupBox_10">
                   <property name="enabled">
                    <bool>true</bool>

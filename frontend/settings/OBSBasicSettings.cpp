@@ -38,6 +38,8 @@
 #include <widgets/OBSBasic.hpp>
 #include <widgets/OBSProjector.hpp>
 
+#include <algorithm>
+
 #include <properties-view.hpp>
 #include <qt-wrappers.hpp>
 
@@ -1236,6 +1238,10 @@ void OBSBasicSettings::LoadGeneralSettings()
 {
 	loading = true;
 
+	config_set_default_bool(App()->GetUserConfig(), "General", "BlackScreenWarningEnabled", true);
+	config_set_default_int(App()->GetUserConfig(), "General", "BlackScreenWarningSeconds", 10);
+	config_set_default_int(App()->GetUserConfig(), "General", "BlackScreenWarningThreshold", 8);
+
 	LoadLanguageList();
 
 #if defined(_WIN32) || defined(ENABLE_SPARKLE_UPDATER)
@@ -1246,6 +1252,24 @@ void OBSBasicSettings::LoadGeneralSettings()
 #endif
 	bool openStatsOnStartup = config_get_bool(main->Config(), "General", "OpenStatsOnStartup");
 	ui->openStatsOnStartup->setChecked(openStatsOnStartup);
+
+	if (ui->enableBlackScreenWarning) {
+		const bool enabled = config_get_bool(App()->GetUserConfig(), "General", "BlackScreenWarningEnabled");
+		const int seconds = (int)config_get_int(App()->GetUserConfig(), "General", "BlackScreenWarningSeconds");
+		const int threshold = (int)config_get_int(App()->GetUserConfig(), "General", "BlackScreenWarningThreshold");
+
+		ui->enableBlackScreenWarning->setChecked(enabled);
+		ui->blackScreenSeconds->setValue(std::clamp(seconds, 1, 3600));
+		ui->blackScreenThreshold->setValue(std::clamp(threshold, 0, 255));
+
+		ui->blackScreenSeconds->setEnabled(enabled);
+		ui->blackScreenThreshold->setEnabled(enabled);
+
+		connect(ui->enableBlackScreenWarning, &QCheckBox::toggled, ui->blackScreenSeconds, &QWidget::setEnabled,
+			Qt::UniqueConnection);
+		connect(ui->enableBlackScreenWarning, &QCheckBox::toggled, ui->blackScreenThreshold, &QWidget::setEnabled,
+			Qt::UniqueConnection);
+	}
 
 #if defined(_WIN32)
 	if (ui->hideOBSFromCapture) {
@@ -2966,6 +2990,18 @@ void OBSBasicSettings::SaveGeneralSettings()
 #endif
 	if (WidgetChanged(ui->openStatsOnStartup))
 		config_set_bool(main->Config(), "General", "OpenStatsOnStartup", ui->openStatsOnStartup->isChecked());
+
+	if (ui->enableBlackScreenWarning) {
+		if (WidgetChanged(ui->enableBlackScreenWarning))
+			config_set_bool(App()->GetUserConfig(), "General", "BlackScreenWarningEnabled",
+					ui->enableBlackScreenWarning->isChecked());
+		if (WidgetChanged(ui->blackScreenSeconds))
+			config_set_int(App()->GetUserConfig(), "General", "BlackScreenWarningSeconds",
+					ui->blackScreenSeconds->value());
+		if (WidgetChanged(ui->blackScreenThreshold))
+			config_set_int(App()->GetUserConfig(), "General", "BlackScreenWarningThreshold",
+					ui->blackScreenThreshold->value());
+	}
 	if (WidgetChanged(ui->snappingEnabled))
 		config_set_bool(App()->GetUserConfig(), "BasicWindow", "SnappingEnabled",
 				ui->snappingEnabled->isChecked());

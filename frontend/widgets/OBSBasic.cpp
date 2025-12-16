@@ -65,6 +65,8 @@
 #include <string>
 #include <unordered_set>
 
+#include <algorithm>
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include "Windows.h"
@@ -94,9 +96,9 @@ public:
 private:
 	static constexpr uint32_t kSampleW = 16;
 	static constexpr uint32_t kSampleH = 16;
-	static constexpr uint8_t kBlackThreshold = 8; // per-channel threshold in 0..255
 	static constexpr float kSampleIntervalSec = 1.0f;
-	static constexpr int kTriggerSeconds = 10;
+	static constexpr int kDefaultTriggerSeconds = 10;
+	static constexpr uint8_t kDefaultBlackThreshold = 8;
 
 	QPointer<OBSBasic> main;
 	gs_texrender_t *texrender = nullptr;
@@ -105,12 +107,23 @@ private:
 	float accum = 0.0f;
 	int consecutiveBlackSeconds = 0;
 	bool alertShown = false;
+	int triggerSeconds = kDefaultTriggerSeconds;
+	uint8_t blackThreshold = kDefaultBlackThreshold;
+	bool enabled = true;
 
 	static void Tick(void *param, float seconds)
 	{
 		auto *self = static_cast<BlackScreenDetector *>(param);
 		if (!self || !self->main)
 			return;
+
+		self->LoadConfig();
+		if (!self->enabled) {
+			self->consecutiveBlackSeconds = 0;
+			self->alertShown = false;
+			self->accum = 0.0f;
+			return;
+		}
 
 		self->accum += seconds;
 		if (self->accum < kSampleIntervalSec)
@@ -173,7 +186,7 @@ private:
 				const uint8_t b = line[x * 4 + 0];
 				const uint8_t g = line[x * 4 + 1];
 				const uint8_t r = line[x * 4 + 2];
-				if (r > kBlackThreshold || g > kBlackThreshold || b > kBlackThreshold) {
+				if (r > blackThreshold || g > blackThreshold || b > blackThreshold) {
 					allBlack = false;
 					break;
 				}
@@ -188,19 +201,54 @@ private:
 	{
 		if (isBlack) {
 			consecutiveBlackSeconds++;
-			if (!alertShown && consecutiveBlackSeconds >= kTriggerSeconds) {
+			if (!alertShown && consecutiveBlackSeconds >= triggerSeconds) {
 				alertShown = true;
 				QMetaObject::invokeMethod(main, [this]() {
 					if (!main)
 						return;
 					const QString msg = QStringLiteral("WARNING: BLACK SCREEN!!!");
-					OBSMessageBox::warning(main, msg, msg);
+					auto *box = new QMessageBox(QMessageBox::Critical, msg, msg, QMessageBox::Ok, main);
+					box->setAttribute(Qt::WA_DeleteOnClose);
+					box->setWindowModality(Qt::ApplicationModal);
+					box->setWindowFlag(Qt::WindowStaysOnTopHint, true);
+					QFont f = box->font();
+					f.setPointSizeF(std::max(12.0, f.pointSizeF() * 1.6));
+					f.setBold(true);
+					box->setFont(f);
+					box->show();
+					box->raise();
+					box->activateWindow();
+					QApplication::alert(box, 0);
 				}, Qt::QueuedConnection);
 			}
 		} else {
 			consecutiveBlackSeconds = 0;
 			alertShown = false;
 		}
+	}
+
+	void LoadConfig()
+	{
+		config_t *cfg = App()->GetUserConfig();
+		if (!cfg)
+			return;
+
+		enabled = config_get_bool(cfg, "General", "BlackScreenWarningEnabled");
+		int64_t seconds = config_get_int(cfg, "General", "BlackScreenWarningSeconds");
+		int64_t threshold = config_get_int(cfg, "General", "BlackScreenWarningThreshold");
+
+		if (seconds <= 0)
+			seconds = kDefaultTriggerSeconds;
+		if (seconds > 3600)
+			seconds = 3600;
+
+		if (threshold < 0)
+			threshold = 0;
+		if (threshold > 255)
+			threshold = 255;
+
+		triggerSeconds = (int)seconds;
+		blackThreshold = (uint8_t)threshold;
 	}
 };
 
