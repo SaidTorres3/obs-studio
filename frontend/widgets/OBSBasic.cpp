@@ -66,6 +66,7 @@
 #include <unordered_set>
 
 #include <algorithm>
+#include <cmath>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -89,21 +90,19 @@ public:
 
 		obs_enter_graphics();
 		gs_stagesurface_destroy(stagesurf);
-		gs_texrender_destroy(texrender);
 		obs_leave_graphics();
 	}
 
 private:
-	static constexpr uint32_t kSampleW = 16;
-	static constexpr uint32_t kSampleH = 16;
 	static constexpr float kSampleIntervalSec = 1.0f;
 	static constexpr int kDefaultTriggerSeconds = 10;
 	static constexpr int kDefaultSensitivity = 3; // roughly matches old default threshold=8
 	static constexpr uint8_t kMaxThresholdForSensitivity20 = 102; // ~40% brightness ("60% black")
 
 	QPointer<OBSBasic> main;
-	gs_texrender_t *texrender = nullptr;
 	gs_stagesurf_t *stagesurf = nullptr;
+	uint32_t stageW = 0;
+	uint32_t stageH = 0;
 
 	float accum = 0.0f;
 	int consecutiveBlackSeconds = 0;
@@ -111,6 +110,7 @@ private:
 	int triggerSeconds = kDefaultTriggerSeconds;
 	int sensitivity = kDefaultSensitivity;
 	uint8_t blackThreshold = 0;
+	float requiredBlackRatio = 1.0f;
 	bool enabled = true;
 
 	static void Tick(void *param, float seconds)
@@ -153,11 +153,8 @@ private:
 
 	bool EnsureResources()
 	{
-		if (!texrender)
-			texrender = gs_texrender_create(GS_BGRA, GS_ZS_NONE);
-		if (!stagesurf)
-			stagesurf = gs_stagesurface_create(kSampleW, kSampleH, GS_BGRA);
-		return texrender && stagesurf;
+		// Resources are created lazily once we know the main texture size.
+		return true;
 	}
 
 	bool SampleIsBlack()
@@ -165,45 +162,76 @@ private:
 		if (!EnsureResources())
 			return false;
 
-		gs_texrender_reset(texrender);
-		if (!gs_texrender_begin(texrender, kSampleW, kSampleH))
+		gs_texture_t *tex = obs_get_main_texture();
+		if (!tex)
 			return false;
 
-		vec4 zero;
-		vec4_zero(&zero);
-		gs_clear(GS_CLEAR_COLOR, &zero, 0.0f, 0);
-		gs_ortho(0.0f, (float)kSampleW, 0.0f, (float)kSampleH, -100.0f, 100.0f);
+		const uint32_t w = gs_texture_get_width(tex);
+		const uint32_t h = gs_texture_get_height(tex);
+		if (!w || !h)
+			return false;
 
-		gs_blend_state_push();
-		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
-		obs_render_main_texture();
-		gs_blend_state_pop();
+		if (!stagesurf || stageW != w || stageH != h) {
+			gs_stagesurface_destroy(stagesurf);
+			stagesurf = gs_stagesurface_create(w, h, GS_BGRA);
+			stageW = w;
+			stageH = h;
+			if (!stagesurf)
+				return false;
+		}
 
-		gs_texrender_end(texrender);
-		gs_stage_texture(stagesurf, gs_texrender_get_texture(texrender));
+		gs_stage_texture(stagesurf, tex);
 
 		uint8_t *videoData = nullptr;
 		uint32_t videoLinesize = 0;
 		if (!gs_stagesurface_map(stagesurf, &videoData, &videoLinesize))
 			return false;
 
-		bool allBlack = true;
-		for (uint32_t y = 0; y < kSampleH && allBlack; y++) {
-			const uint8_t *line = videoData + (y * videoLinesize);
-			for (uint32_t x = 0; x < kSampleW; x++) {
+		const bool strictAllBlack = requiredBlackRatio >= 0.999f;
+
+		uint64_t totalSamples = 0;
+		uint64_t blackSamples = 0;
+
+		// Strict mode (sensitivity=1): scan everything and early-exit on any non-black.
+		// Other modes: sample a grid so a tiny logo doesn't prevent triggering.
+		uint32_t step = 1;
+		if (!strictAllBlack) {
+			static constexpr uint64_t kMaxSamples = 200000; // per-sample-pass cap
+			const double pixels = double(stageW) * double(stageH);
+			if (pixels > double(kMaxSamples)) {
+				const double idealStep = std::sqrt(pixels / double(kMaxSamples));
+				step = (uint32_t)std::clamp<int>((int)std::ceil(idealStep), 1, 256);
+			}
+		}
+
+		bool anyNonBlack = false;
+		for (uint32_t y = 0; y < stageH; y += step) {
+			const uint8_t *line = videoData + (uint64_t(y) * uint64_t(videoLinesize));
+			for (uint32_t x = 0; x < stageW; x += step) {
 				// BGRA
 				const uint8_t b = line[x * 4 + 0];
 				const uint8_t g = line[x * 4 + 1];
 				const uint8_t r = line[x * 4 + 2];
-				if (r > blackThreshold || g > blackThreshold || b > blackThreshold) {
-					allBlack = false;
+				const bool isBlack = (r <= blackThreshold && g <= blackThreshold && b <= blackThreshold);
+
+				totalSamples++;
+				if (isBlack) {
+					blackSamples++;
+				} else if (strictAllBlack) {
+					anyNonBlack = true;
 					break;
 				}
 			}
+			if (anyNonBlack)
+				break;
 		}
 
+		const bool isBlackFrame = strictAllBlack
+			? !anyNonBlack
+			: (totalSamples > 0 && (double)blackSamples / (double)totalSamples >= (double)requiredBlackRatio);
+
 		gs_stagesurface_unmap(stagesurf);
-		return allBlack;
+		return isBlackFrame;
 	}
 
 	void OnSample(bool isBlack)
@@ -266,9 +294,13 @@ private:
 
 		triggerSeconds = (int)seconds;
 		sensitivity = (int)sens;
-		// Map sensitivity 1..20 to threshold 0..kMaxThresholdForSensitivity20
+		// Pixel black threshold: sensitivity 1..20 -> threshold 0..kMaxThresholdForSensitivity20
 		const int s0 = sensitivity - 1;
 		blackThreshold = (uint8_t)((s0 * kMaxThresholdForSensitivity20 + 9) / 19);
+
+		// Coverage requirement: sensitivity 1 => 100% black required, 20 => 60% black required
+		const float t = float(s0) / 19.0f;
+		requiredBlackRatio = std::clamp(1.0f - (t * 0.4f), 0.6f, 1.0f);
 	}
 };
 
