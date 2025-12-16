@@ -74,6 +74,136 @@
 
 using namespace std;
 
+class BlackScreenDetector {
+public:
+	explicit BlackScreenDetector(OBSBasic *main_) : main(main_)
+	{
+		obs_add_tick_callback(BlackScreenDetector::Tick, this);
+	}
+
+	~BlackScreenDetector()
+	{
+		obs_remove_tick_callback(BlackScreenDetector::Tick, this);
+
+		obs_enter_graphics();
+		gs_stagesurface_destroy(stagesurf);
+		gs_texrender_destroy(texrender);
+		obs_leave_graphics();
+	}
+
+private:
+	static constexpr uint32_t kSampleW = 16;
+	static constexpr uint32_t kSampleH = 16;
+	static constexpr uint8_t kBlackThreshold = 8; // per-channel threshold in 0..255
+	static constexpr float kSampleIntervalSec = 1.0f;
+	static constexpr int kTriggerSeconds = 10;
+
+	QPointer<OBSBasic> main;
+	gs_texrender_t *texrender = nullptr;
+	gs_stagesurf_t *stagesurf = nullptr;
+
+	float accum = 0.0f;
+	int consecutiveBlackSeconds = 0;
+	bool alertShown = false;
+
+	static void Tick(void *param, float seconds)
+	{
+		auto *self = static_cast<BlackScreenDetector *>(param);
+		if (!self || !self->main)
+			return;
+
+		self->accum += seconds;
+		if (self->accum < kSampleIntervalSec)
+			return;
+
+		// Keep remainder to avoid drift.
+		self->accum -= kSampleIntervalSec;
+		if (self->accum > 5.0f)
+			self->accum = 0.0f;
+
+		bool isBlack = false;
+		obs_enter_graphics();
+		isBlack = self->SampleIsBlack();
+		obs_leave_graphics();
+
+		self->OnSample(isBlack);
+	}
+
+	bool EnsureResources()
+	{
+		if (!texrender)
+			texrender = gs_texrender_create(GS_BGRA, GS_ZS_NONE);
+		if (!stagesurf)
+			stagesurf = gs_stagesurface_create(kSampleW, kSampleH, GS_BGRA);
+		return texrender && stagesurf;
+	}
+
+	bool SampleIsBlack()
+	{
+		if (!EnsureResources())
+			return false;
+
+		gs_texrender_reset(texrender);
+		if (!gs_texrender_begin(texrender, kSampleW, kSampleH))
+			return false;
+
+		vec4 zero;
+		vec4_zero(&zero);
+		gs_clear(GS_CLEAR_COLOR, &zero, 0.0f, 0);
+		gs_ortho(0.0f, (float)kSampleW, 0.0f, (float)kSampleH, -100.0f, 100.0f);
+
+		gs_blend_state_push();
+		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
+		obs_render_main_texture();
+		gs_blend_state_pop();
+
+		gs_texrender_end(texrender);
+		gs_stage_texture(stagesurf, gs_texrender_get_texture(texrender));
+
+		uint8_t *videoData = nullptr;
+		uint32_t videoLinesize = 0;
+		if (!gs_stagesurface_map(stagesurf, &videoData, &videoLinesize))
+			return false;
+
+		bool allBlack = true;
+		for (uint32_t y = 0; y < kSampleH && allBlack; y++) {
+			const uint8_t *line = videoData + (y * videoLinesize);
+			for (uint32_t x = 0; x < kSampleW; x++) {
+				// BGRA
+				const uint8_t b = line[x * 4 + 0];
+				const uint8_t g = line[x * 4 + 1];
+				const uint8_t r = line[x * 4 + 2];
+				if (r > kBlackThreshold || g > kBlackThreshold || b > kBlackThreshold) {
+					allBlack = false;
+					break;
+				}
+			}
+		}
+
+		gs_stagesurface_unmap(stagesurf);
+		return allBlack;
+	}
+
+	void OnSample(bool isBlack)
+	{
+		if (isBlack) {
+			consecutiveBlackSeconds++;
+			if (!alertShown && consecutiveBlackSeconds >= kTriggerSeconds) {
+				alertShown = true;
+				QMetaObject::invokeMethod(main, [this]() {
+					if (!main)
+						return;
+					const QString msg = QStringLiteral("WARNING: BLACK SCREEN!!!");
+					OBSMessageBox::warning(main, msg, msg);
+				}, Qt::QueuedConnection);
+			}
+		} else {
+			consecutiveBlackSeconds = 0;
+			alertShown = false;
+		}
+	}
+};
+
 extern bool portable_mode;
 extern bool disable_3p_plugins;
 extern bool opt_studio_mode;
@@ -1352,6 +1482,9 @@ void OBSBasic::OnFirstLoad()
 {
 	OnEvent(OBS_FRONTEND_EVENT_FINISHED_LOADING);
 
+	if (!blackScreenDetector)
+		blackScreenDetector = new BlackScreenDetector(this);
+
 #ifdef WHATSNEW_ENABLED
 	/* Attempt to load init screen if available */
 	if (cef) {
@@ -1380,6 +1513,9 @@ OBSBasic::~OBSBasic()
 
 void OBSBasic::applicationShutdown() noexcept
 {
+	delete blackScreenDetector;
+	blackScreenDetector = nullptr;
+
 	/* clear out UI event queue */
 	QApplication::sendPostedEvents(nullptr);
 	QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);

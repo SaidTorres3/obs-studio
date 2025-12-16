@@ -60,6 +60,7 @@ class YouTubeAppDock;
 class QMessageBox;
 class QWidgetAction;
 struct QuickTransition;
+class BlackScreenDetector;
 
 namespace OBS {
 class SceneCollection;
@@ -1363,6 +1364,7 @@ public:
 	 * -------------------------------------
 	 */
 private:
+	BlackScreenDetector *blackScreenDetector = nullptr;
 	QPointer<QTimer> cpuUsageTimer;
 	os_cpu_usage_info_t *cpuUsageInfo = nullptr;
 
