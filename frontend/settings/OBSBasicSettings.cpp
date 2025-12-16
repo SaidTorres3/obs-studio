@@ -336,6 +336,9 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 	HookWidget(ui->updateChannelBox,     COMBO_CHANGED,  GENERAL_CHANGED);
 	HookWidget(ui->enableAutoUpdates,    CHECK_CHANGED,  GENERAL_CHANGED);
 	HookWidget(ui->openStatsOnStartup,   CHECK_CHANGED,  GENERAL_CHANGED);
+	HookWidget(ui->enableBlackScreenWarning, CHECK_CHANGED,  GENERAL_CHANGED);
+	HookWidget(ui->blackScreenSeconds,       SCROLL_CHANGED, GENERAL_CHANGED);
+	HookWidget(ui->blackScreenThreshold,     SCROLL_CHANGED, GENERAL_CHANGED);
 	HookWidget(ui->hideOBSFromCapture,   CHECK_CHANGED,  GENERAL_CHANGED);
 	HookWidget(ui->warnBeforeStreamStart,CHECK_CHANGED,  GENERAL_CHANGED);
 	HookWidget(ui->warnBeforeStreamStop, CHECK_CHANGED,  GENERAL_CHANGED);
@@ -1240,7 +1243,7 @@ void OBSBasicSettings::LoadGeneralSettings()
 
 	config_set_default_bool(App()->GetUserConfig(), "General", "BlackScreenWarningEnabled", true);
 	config_set_default_int(App()->GetUserConfig(), "General", "BlackScreenWarningSeconds", 10);
-	config_set_default_int(App()->GetUserConfig(), "General", "BlackScreenWarningThreshold", 8);
+	config_set_default_int(App()->GetUserConfig(), "General", "BlackScreenWarningSensitivity", 3);
 
 	LoadLanguageList();
 
@@ -1256,11 +1259,20 @@ void OBSBasicSettings::LoadGeneralSettings()
 	if (ui->enableBlackScreenWarning) {
 		const bool enabled = config_get_bool(App()->GetUserConfig(), "General", "BlackScreenWarningEnabled");
 		const int seconds = (int)config_get_int(App()->GetUserConfig(), "General", "BlackScreenWarningSeconds");
-		const int threshold = (int)config_get_int(App()->GetUserConfig(), "General", "BlackScreenWarningThreshold");
+
+		int sensitivity = 3;
+		if (config_has_user_value(App()->GetUserConfig(), "General", "BlackScreenWarningSensitivity")) {
+			sensitivity = (int)config_get_int(App()->GetUserConfig(), "General", "BlackScreenWarningSensitivity");
+		} else {
+			// Backward compat: map old 0..255 threshold into 1..20 sensitivity.
+			const int oldThreshold = (int)config_get_int(App()->GetUserConfig(), "General", "BlackScreenWarningThreshold");
+			const int capped = std::clamp(oldThreshold, 0, 102);
+			sensitivity = 1 + (capped * 19 + 51) / 102;
+		}
 
 		ui->enableBlackScreenWarning->setChecked(enabled);
 		ui->blackScreenSeconds->setValue(std::clamp(seconds, 1, 3600));
-		ui->blackScreenThreshold->setValue(std::clamp(threshold, 0, 255));
+		ui->blackScreenThreshold->setValue(std::clamp(sensitivity, 1, 20));
 
 		ui->blackScreenSeconds->setEnabled(enabled);
 		ui->blackScreenThreshold->setEnabled(enabled);
@@ -2999,7 +3011,7 @@ void OBSBasicSettings::SaveGeneralSettings()
 			config_set_int(App()->GetUserConfig(), "General", "BlackScreenWarningSeconds",
 					ui->blackScreenSeconds->value());
 		if (WidgetChanged(ui->blackScreenThreshold))
-			config_set_int(App()->GetUserConfig(), "General", "BlackScreenWarningThreshold",
+			config_set_int(App()->GetUserConfig(), "General", "BlackScreenWarningSensitivity",
 					ui->blackScreenThreshold->value());
 	}
 	if (WidgetChanged(ui->snappingEnabled))

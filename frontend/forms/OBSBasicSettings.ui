@@ -491,7 +491,7 @@
                    <item row="2" column="0">
                     <widget class="QLabel" name="blackScreenThresholdLabel">
                      <property name="text">
-                      <string>Sensitivity (0-255)</string>
+                        <string>Sensitivity (1-20)</string>
                      </property>
                      <property name="buddy">
                       <cstring>blackScreenThreshold</cstring>
@@ -501,13 +501,13 @@
                    <item row="2" column="1">
                     <widget class="QSpinBox" name="blackScreenThreshold">
                      <property name="minimum">
-                      <number>0</number>
+                        <number>1</number>
                      </property>
                      <property name="maximum">
-                      <number>255</number>
+                        <number>20</number>
                      </property>
                      <property name="value">
-                      <number>8</number>
+                        <number>3</number>
                      </property>
                     </widget>
                    </item>

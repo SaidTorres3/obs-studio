@@ -98,7 +98,8 @@ private:
 	static constexpr uint32_t kSampleH = 16;
 	static constexpr float kSampleIntervalSec = 1.0f;
 	static constexpr int kDefaultTriggerSeconds = 10;
-	static constexpr uint8_t kDefaultBlackThreshold = 8;
+	static constexpr int kDefaultSensitivity = 3; // roughly matches old default threshold=8
+	static constexpr uint8_t kMaxThresholdForSensitivity20 = 102; // ~40% brightness ("60% black")
 
 	QPointer<OBSBasic> main;
 	gs_texrender_t *texrender = nullptr;
@@ -108,7 +109,8 @@ private:
 	int consecutiveBlackSeconds = 0;
 	bool alertShown = false;
 	int triggerSeconds = kDefaultTriggerSeconds;
-	uint8_t blackThreshold = kDefaultBlackThreshold;
+	int sensitivity = kDefaultSensitivity;
+	uint8_t blackThreshold = 0;
 	bool enabled = true;
 
 	static void Tick(void *param, float seconds)
@@ -119,6 +121,13 @@ private:
 
 		self->LoadConfig();
 		if (!self->enabled) {
+			self->consecutiveBlackSeconds = 0;
+			self->alertShown = false;
+			self->accum = 0.0f;
+			return;
+		}
+
+		if (!(self->main->StreamingActive() || self->main->RecordingActive() || self->main->ReplayBufferActive())) {
 			self->consecutiveBlackSeconds = 0;
 			self->alertShown = false;
 			self->accum = 0.0f;
@@ -212,7 +221,7 @@ private:
 					box->setWindowModality(Qt::ApplicationModal);
 					box->setWindowFlag(Qt::WindowStaysOnTopHint, true);
 					QFont f = box->font();
-					f.setPointSizeF(std::max(12.0, f.pointSizeF() * 1.6));
+					f.setPointSizeF((std::max)(12.0, f.pointSizeF() * 1.6));
 					f.setBold(true);
 					box->setFont(f);
 					box->show();
@@ -235,20 +244,31 @@ private:
 
 		enabled = config_get_bool(cfg, "General", "BlackScreenWarningEnabled");
 		int64_t seconds = config_get_int(cfg, "General", "BlackScreenWarningSeconds");
-		int64_t threshold = config_get_int(cfg, "General", "BlackScreenWarningThreshold");
+
+		int64_t sens = (int64_t)kDefaultSensitivity;
+		if (config_has_user_value(cfg, "General", "BlackScreenWarningSensitivity")) {
+			sens = config_get_int(cfg, "General", "BlackScreenWarningSensitivity");
+		} else {
+			// Backward compatibility: map old 0..255 threshold to 1..20 sensitivity.
+			int64_t oldThreshold = config_get_int(cfg, "General", "BlackScreenWarningThreshold");
+			oldThreshold = std::clamp<int64_t>(oldThreshold, 0, 255);
+			// Convert 0..kMaxThresholdForSensitivity20 range into 1..20.
+			const int64_t capped = std::min<int64_t>(oldThreshold, kMaxThresholdForSensitivity20);
+			sens = 1 + (capped * 19 + (kMaxThresholdForSensitivity20 / 2)) / kMaxThresholdForSensitivity20;
+		}
 
 		if (seconds <= 0)
 			seconds = kDefaultTriggerSeconds;
 		if (seconds > 3600)
 			seconds = 3600;
 
-		if (threshold < 0)
-			threshold = 0;
-		if (threshold > 255)
-			threshold = 255;
+		sens = std::clamp<int64_t>(sens, 1, 20);
 
 		triggerSeconds = (int)seconds;
-		blackThreshold = (uint8_t)threshold;
+		sensitivity = (int)sens;
+		// Map sensitivity 1..20 to threshold 0..kMaxThresholdForSensitivity20
+		const int s0 = sensitivity - 1;
+		blackThreshold = (uint8_t)((s0 * kMaxThresholdForSensitivity20 + 9) / 19);
 	}
 };
 
