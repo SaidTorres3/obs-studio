@@ -925,7 +925,7 @@ uint64_t ffmpeg_mux_total_bytes(void *data)
 
 struct obs_output_info ffmpeg_muxer = {
 	.id = "ffmpeg_muxer",
-	.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_MULTI_TRACK | OBS_OUTPUT_CAN_PAUSE,
+	.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_MULTI_TRACK_AV | OBS_OUTPUT_CAN_PAUSE,
 	.get_name = ffmpeg_mux_getname,
 	.create = ffmpeg_mux_create,
 	.destroy = ffmpeg_mux_destroy,
@@ -953,7 +953,7 @@ static int ffmpeg_mpegts_mux_connect_time(void *data)
 
 struct obs_output_info ffmpeg_mpegts_muxer = {
 	.id = "ffmpeg_mpegts_muxer",
-	.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_MULTI_TRACK | OBS_OUTPUT_SERVICE,
+	.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_MULTI_TRACK_AUDIO | OBS_OUTPUT_SERVICE,
 	.protocols = "SRT;RIST",
 	.encoded_video_codecs = "h264",
 	.encoded_audio_codecs = "aac;opus",
@@ -1320,7 +1320,7 @@ static void replay_buffer_defaults(obs_data_t *s)
 
 struct obs_output_info replay_buffer = {
 	.id = "replay_buffer",
-	.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_MULTI_TRACK | OBS_OUTPUT_CAN_PAUSE,
+	.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_MULTI_TRACK_AV | OBS_OUTPUT_CAN_PAUSE,
 	.get_name = replay_buffer_getname,
 	.create = replay_buffer_create,
 	.destroy = replay_buffer_destroy,
