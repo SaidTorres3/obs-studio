@@ -232,6 +232,7 @@ private:
 
 private slots:
 	void UpdateMultitrackVideo();
+	void UpdateRecordingVideoTracksUI();
 	void RecreateOutputResolutionWidget();
 	bool UpdateResFPSLimits();
 	void DisplayEnforceWarning(bool checked);
@@ -333,7 +334,9 @@ private:
 
 	int CurrentFLVTrack();
 	int SimpleOutGetSelectedAudioTracks();
+	int SimpleOutGetSelectedVideoTracks();
 	int AdvOutGetSelectedAudioTracks();
+	int AdvOutGetSelectedVideoTracks();
 	int AdvOutGetStreamingSelectedAudioTracks();
 
 	OBSService GetStream1Service();

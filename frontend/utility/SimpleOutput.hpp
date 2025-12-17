@@ -8,7 +8,11 @@ struct SimpleOutput : BasicOutputHandler {
 	OBSEncoder audioRecording;
 	OBSEncoder audioArchive;
 	OBSEncoder videoRecording;
+	OBSEncoder videoRecordingTrack2;
+	OBSEncoder videoRecordingTrack3;
 	OBSEncoder audioTrack[MAX_AUDIO_MIXES];
+	OBSCanvasAutoRelease videoTrack2Canvas;
+	OBSCanvasAutoRelease videoTrack3Canvas;
 
 	std::string videoEncoder;
 	std::string videoQuality;

@@ -8,6 +8,43 @@
 
 using namespace std;
 
+static OBSCanvasAutoRelease CreateRecordingVideoTrackCanvas(const char *name)
+{
+	obs_video_info ovi;
+	if (!obs_get_video_info(&ovi))
+		return nullptr;
+
+	return OBSCanvasAutoRelease{obs_canvas_create_private(name, &ovi, ACTIVATE | SCENE_REF)};
+}
+
+static void SetCanvasScene(obs_canvas_t *canvas, const char *scene_name)
+{
+	if (!canvas)
+		return;
+
+	if (!scene_name || !*scene_name) {
+		obs_canvas_set_channel(canvas, 0, nullptr);
+		return;
+	}
+
+	OBSSourceAutoRelease scene_source = obs_get_source_by_name(scene_name);
+	obs_canvas_set_channel(canvas, 0, scene_source);
+}
+
+static bool EnsureExtraVideoEncoder(OBSEncoder &encoder, obs_encoder_t *base, const char *name)
+{
+	if (encoder)
+		return true;
+
+	const char *id = obs_encoder_get_id(base);
+	encoder = obs_video_encoder_create(id, name, nullptr, nullptr);
+	if (!encoder)
+		return false;
+
+	obs_encoder_release(encoder);
+	return true;
+}
+
 static bool CreateSimpleAACEncoder(OBSEncoder &res, int bitrate, const char *name, size_t idx)
 {
 	const char *id_ = GetSimpleAACEncoderForBitrate(bitrate);
@@ -737,9 +774,13 @@ void SimpleOutput::UpdateRecording()
 	const char *recFormat = config_get_string(main->Config(), "SimpleOutput", "RecFormat2");
 	bool flv = strcmp(recFormat, "flv") == 0;
 	int tracks = config_get_int(main->Config(), "SimpleOutput", "RecTracks");
+	int videoTracks = config_get_int(main->Config(), "SimpleOutput", "RecVideoTracks");
 	int idx = 0;
 	int idx2 = 0;
 	const char *quality = config_get_string(main->Config(), "SimpleOutput", "RecQuality");
+	const bool mkv = strcmp(recFormat, "mkv") == 0;
+	const bool allowMultiVideo = mkv && usingRecordingPreset && !ffmpegOutput && strcmp(quality, "Stream") != 0 &&
+				     strcmp(quality, "Lossless") != 0;
 
 	if (replayBufferActive || recordingActive)
 		return;
@@ -755,7 +796,55 @@ void SimpleOutput::UpdateRecording()
 		SetupOutputs();
 
 	if (!ffmpegOutput) {
-		obs_output_set_video_encoder(fileOutput, videoRecording);
+		obs_output_set_video_encoder2(fileOutput, videoRecording, 0);
+		for (size_t i = 1; i < MAX_OUTPUT_VIDEO_ENCODERS; i++)
+			obs_output_set_video_encoder2(fileOutput, nullptr, i);
+
+		size_t videoIdx = 1;
+		if (allowMultiVideo && (videoTracks & (1 << 1)) != 0 &&
+		    EnsureExtraVideoEncoder(videoRecordingTrack2, videoRecording, "simple_video_recording_2")) {
+			OBSDataAutoRelease settings = obs_encoder_get_settings(videoRecording);
+			obs_encoder_update(videoRecordingTrack2, settings);
+
+			const char *scene = config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack2Source");
+			if (scene && *scene) {
+				if (!videoTrack2Canvas)
+					videoTrack2Canvas = CreateRecordingVideoTrackCanvas("Recording Track 2");
+				if (videoTrack2Canvas) {
+					SetCanvasScene(videoTrack2Canvas, scene);
+					obs_encoder_set_video(videoRecordingTrack2, obs_canvas_get_video(videoTrack2Canvas));
+				} else {
+					obs_encoder_set_video(videoRecordingTrack2, obs_get_video());
+				}
+			} else {
+				obs_encoder_set_video(videoRecordingTrack2, obs_get_video());
+			}
+
+			obs_output_set_video_encoder2(fileOutput, videoRecordingTrack2, videoIdx++);
+		}
+
+		if (allowMultiVideo && (videoTracks & (1 << 2)) != 0 &&
+		    EnsureExtraVideoEncoder(videoRecordingTrack3, videoRecording, "simple_video_recording_3")) {
+			OBSDataAutoRelease settings = obs_encoder_get_settings(videoRecording);
+			obs_encoder_update(videoRecordingTrack3, settings);
+
+			const char *scene = config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack3Source");
+			if (scene && *scene) {
+				if (!videoTrack3Canvas)
+					videoTrack3Canvas = CreateRecordingVideoTrackCanvas("Recording Track 3");
+				if (videoTrack3Canvas) {
+					SetCanvasScene(videoTrack3Canvas, scene);
+					obs_encoder_set_video(videoRecordingTrack3, obs_canvas_get_video(videoTrack3Canvas));
+				} else {
+					obs_encoder_set_video(videoRecordingTrack3, obs_get_video());
+				}
+			} else {
+				obs_encoder_set_video(videoRecordingTrack3, obs_get_video());
+			}
+
+			obs_output_set_video_encoder2(fileOutput, videoRecordingTrack3, videoIdx++);
+		}
+
 		if (flv || strcmp(quality, "Stream") == 0) {
 			obs_output_set_audio_encoder(fileOutput, audioRecording, 0);
 		} else {
@@ -767,7 +856,9 @@ void SimpleOutput::UpdateRecording()
 		}
 	}
 	if (replayBuffer) {
-		obs_output_set_video_encoder(replayBuffer, videoRecording);
+		obs_output_set_video_encoder2(replayBuffer, videoRecording, 0);
+		for (size_t i = 1; i < MAX_OUTPUT_VIDEO_ENCODERS; i++)
+			obs_output_set_video_encoder2(replayBuffer, nullptr, i);
 		if (flv || strcmp(quality, "Stream") == 0) {
 			obs_output_set_audio_encoder(replayBuffer, audioRecording, 0);
 		} else {
@@ -833,6 +924,40 @@ bool SimpleOutput::ConfigureRecording(bool updateReplayBuffer)
 			blog(LOG_WARNING, "User enabled fragmented recording, "
 					  "but custom muxer settings contained movflags.");
 		obs_data_set_string(settings, "muxer_settings", mux);
+	}
+
+	if (!ffmpegOutput) {
+		const bool mkv = strcmp(format, "mkv") == 0;
+		const bool allowMultiVideo =
+			mkv && usingRecordingPreset && videoQuality != "Stream" && videoQuality != "Lossless";
+		const int videoTracks = config_get_int(main->Config(), "SimpleOutput", "RecVideoTracks");
+
+		OBSDataArrayAutoRelease video_names = obs_data_array_create();
+
+		auto add_name = [&](const char *name) {
+			OBSDataAutoRelease item = obs_data_create();
+			obs_data_set_string(item, "name", name ? name : "");
+			obs_data_array_push_back(video_names, item);
+		};
+
+		const auto programName = QTStr("StudioMode.Program").toUtf8();
+		add_name(programName.constData());
+
+		if (allowMultiVideo && (videoTracks & (1 << 1)) != 0) {
+			const char *name = config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack2Name");
+			if (!name || !*name)
+				name = config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack2Source");
+			add_name(name && *name ? name : programName.constData());
+		}
+
+		if (allowMultiVideo && (videoTracks & (1 << 2)) != 0) {
+			const char *name = config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack3Name");
+			if (!name || !*name)
+				name = config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack3Source");
+			add_name(name && *name ? name : programName.constData());
+		}
+
+		obs_data_set_array(settings, "video_names", video_names);
 	}
 
 	if (updateReplayBuffer)

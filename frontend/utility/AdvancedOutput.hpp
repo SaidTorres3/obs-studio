@@ -9,6 +9,10 @@ struct AdvancedOutput : BasicOutputHandler {
 	OBSEncoder recordTrack[MAX_AUDIO_MIXES];
 	OBSEncoder videoStreaming;
 	OBSEncoder videoRecording;
+	OBSEncoder videoRecordingTrack2;
+	OBSEncoder videoRecordingTrack3;
+	OBSCanvasAutoRelease videoTrack2Canvas;
+	OBSCanvasAutoRelease videoTrack3Canvas;
 
 	bool ffmpegOutput;
 	bool ffmpegRecording;

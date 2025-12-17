@@ -2913,6 +2913,108 @@
                         </widget>
                        </item>
                        <item row="7" column="0">
+                        <widget class="QCheckBox" name="simpleOutRecVideoTrack2Enable">
+                         <property name="text">
+                          <string>Basic.Settings.Output.Recording.VideoTrack2</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="7" column="1">
+                        <widget class="QWidget" name="simpleOutRecVideoTrack2Controls">
+                         <layout class="QHBoxLayout" name="horizontalLayoutSimpleRecVideoTrack2">
+                          <property name="leftMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="topMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="rightMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="bottomMargin">
+                           <number>0</number>
+                          </property>
+                          <item>
+                           <widget class="QLabel" name="simpleOutRecVideoTrack2SourceLabel">
+                            <property name="text">
+                             <string>Basic.Settings.Output.Recording.TrackSource</string>
+                            </property>
+                            <property name="buddy">
+                             <cstring>simpleOutRecVideoTrack2Source</cstring>
+                            </property>
+                           </widget>
+                          </item>
+                          <item>
+                           <widget class="QComboBox" name="simpleOutRecVideoTrack2Source"/>
+                          </item>
+                          <item>
+                           <widget class="QLabel" name="simpleOutRecVideoTrack2NameLabel">
+                            <property name="text">
+                             <string>Basic.Settings.Output.Recording.TrackName</string>
+                            </property>
+                            <property name="buddy">
+                             <cstring>simpleOutRecVideoTrack2Name</cstring>
+                            </property>
+                           </widget>
+                          </item>
+                          <item>
+                           <widget class="QLineEdit" name="simpleOutRecVideoTrack2Name"/>
+                          </item>
+                         </layout>
+                        </widget>
+                       </item>
+                       <item row="8" column="0">
+                        <widget class="QCheckBox" name="simpleOutRecVideoTrack3Enable">
+                         <property name="text">
+                          <string>Basic.Settings.Output.Recording.VideoTrack3</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="8" column="1">
+                        <widget class="QWidget" name="simpleOutRecVideoTrack3Controls">
+                         <layout class="QHBoxLayout" name="horizontalLayoutSimpleRecVideoTrack3">
+                          <property name="leftMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="topMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="rightMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="bottomMargin">
+                           <number>0</number>
+                          </property>
+                          <item>
+                           <widget class="QLabel" name="simpleOutRecVideoTrack3SourceLabel">
+                            <property name="text">
+                             <string>Basic.Settings.Output.Recording.TrackSource</string>
+                            </property>
+                            <property name="buddy">
+                             <cstring>simpleOutRecVideoTrack3Source</cstring>
+                            </property>
+                           </widget>
+                          </item>
+                          <item>
+                           <widget class="QComboBox" name="simpleOutRecVideoTrack3Source"/>
+                          </item>
+                          <item>
+                           <widget class="QLabel" name="simpleOutRecVideoTrack3NameLabel">
+                            <property name="text">
+                             <string>Basic.Settings.Output.Recording.TrackName</string>
+                            </property>
+                            <property name="buddy">
+                             <cstring>simpleOutRecVideoTrack3Name</cstring>
+                            </property>
+                           </widget>
+                          </item>
+                          <item>
+                           <widget class="QLineEdit" name="simpleOutRecVideoTrack3Name"/>
+                          </item>
+                         </layout>
+                        </widget>
+                       </item>
+                       <item row="9" column="0">
                         <widget class="QLabel" name="label_420">
                          <property name="text">
                           <string>Basic.Settings.Output.CustomMuxerSettings</string>
@@ -2922,7 +3024,7 @@
                          </property>
                         </widget>
                        </item>
-                       <item row="7" column="1">
+                       <item row="9" column="1">
                         <widget class="QLineEdit" name="simpleOutMuxCustom"/>
                        </item>
                       </layout>
@@ -4088,6 +4190,108 @@
                                  <property name="value">
                                   <number>2048</number>
                                  </property>
+                                </widget>
+                               </item>
+                               <item row="11" column="0">
+                                <widget class="QCheckBox" name="advOutRecVideoTrack2Enable">
+                                 <property name="text">
+                                  <string>Basic.Settings.Output.Recording.VideoTrack2</string>
+                                 </property>
+                                </widget>
+                               </item>
+                               <item row="11" column="1">
+                                <widget class="QWidget" name="advOutRecVideoTrack2Controls">
+                                 <layout class="QHBoxLayout" name="horizontalLayoutAdvRecVideoTrack2">
+                                  <property name="leftMargin">
+                                   <number>0</number>
+                                  </property>
+                                  <property name="topMargin">
+                                   <number>0</number>
+                                  </property>
+                                  <property name="rightMargin">
+                                   <number>0</number>
+                                  </property>
+                                  <property name="bottomMargin">
+                                   <number>0</number>
+                                  </property>
+                                  <item>
+                                   <widget class="QLabel" name="advOutRecVideoTrack2SourceLabel">
+                                    <property name="text">
+                                     <string>Basic.Settings.Output.Recording.TrackSource</string>
+                                    </property>
+                                    <property name="buddy">
+                                     <cstring>advOutRecVideoTrack2Source</cstring>
+                                    </property>
+                                   </widget>
+                                  </item>
+                                  <item>
+                                   <widget class="QComboBox" name="advOutRecVideoTrack2Source"/>
+                                  </item>
+                                  <item>
+                                   <widget class="QLabel" name="advOutRecVideoTrack2NameLabel">
+                                    <property name="text">
+                                     <string>Basic.Settings.Output.Recording.TrackName</string>
+                                    </property>
+                                    <property name="buddy">
+                                     <cstring>advOutRecVideoTrack2Name</cstring>
+                                    </property>
+                                   </widget>
+                                  </item>
+                                  <item>
+                                   <widget class="QLineEdit" name="advOutRecVideoTrack2Name"/>
+                                  </item>
+                                 </layout>
+                                </widget>
+                               </item>
+                               <item row="12" column="0">
+                                <widget class="QCheckBox" name="advOutRecVideoTrack3Enable">
+                                 <property name="text">
+                                  <string>Basic.Settings.Output.Recording.VideoTrack3</string>
+                                 </property>
+                                </widget>
+                               </item>
+                               <item row="12" column="1">
+                                <widget class="QWidget" name="advOutRecVideoTrack3Controls">
+                                 <layout class="QHBoxLayout" name="horizontalLayoutAdvRecVideoTrack3">
+                                  <property name="leftMargin">
+                                   <number>0</number>
+                                  </property>
+                                  <property name="topMargin">
+                                   <number>0</number>
+                                  </property>
+                                  <property name="rightMargin">
+                                   <number>0</number>
+                                  </property>
+                                  <property name="bottomMargin">
+                                   <number>0</number>
+                                  </property>
+                                  <item>
+                                   <widget class="QLabel" name="advOutRecVideoTrack3SourceLabel">
+                                    <property name="text">
+                                     <string>Basic.Settings.Output.Recording.TrackSource</string>
+                                    </property>
+                                    <property name="buddy">
+                                     <cstring>advOutRecVideoTrack3Source</cstring>
+                                    </property>
+                                   </widget>
+                                  </item>
+                                  <item>
+                                   <widget class="QComboBox" name="advOutRecVideoTrack3Source"/>
+                                  </item>
+                                  <item>
+                                   <widget class="QLabel" name="advOutRecVideoTrack3NameLabel">
+                                    <property name="text">
+                                     <string>Basic.Settings.Output.Recording.TrackName</string>
+                                    </property>
+                                    <property name="buddy">
+                                     <cstring>advOutRecVideoTrack3Name</cstring>
+                                    </property>
+                                   </widget>
+                                  </item>
+                                  <item>
+                                   <widget class="QLineEdit" name="advOutRecVideoTrack3Name"/>
+                                  </item>
+                                 </layout>
                                 </widget>
                                </item>
                               </layout>

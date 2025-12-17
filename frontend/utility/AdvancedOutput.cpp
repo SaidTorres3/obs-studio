@@ -8,6 +8,43 @@
 
 using namespace std;
 
+static OBSCanvasAutoRelease CreateRecordingVideoTrackCanvas(const char *name)
+{
+	obs_video_info ovi;
+	if (!obs_get_video_info(&ovi))
+		return nullptr;
+
+	return OBSCanvasAutoRelease{obs_canvas_create_private(name, &ovi, ACTIVATE | SCENE_REF)};
+}
+
+static void SetCanvasScene(obs_canvas_t *canvas, const char *scene_name)
+{
+	if (!canvas)
+		return;
+
+	if (!scene_name || !*scene_name) {
+		obs_canvas_set_channel(canvas, 0, nullptr);
+		return;
+	}
+
+	OBSSourceAutoRelease scene_source = obs_get_source_by_name(scene_name);
+	obs_canvas_set_channel(canvas, 0, scene_source);
+}
+
+static bool EnsureExtraVideoEncoder(OBSEncoder &encoder, obs_encoder_t *base, const char *name)
+{
+	if (encoder)
+		return true;
+
+	const char *id = obs_encoder_get_id(base);
+	encoder = obs_video_encoder_create(id, name, nullptr, nullptr);
+	if (!encoder)
+		return false;
+
+	obs_encoder_release(encoder);
+	return true;
+}
+
 static OBSData GetDataFromJsonFile(const char *jsonFile)
 {
 	const OBSBasic *basic = OBSBasic::Get();
@@ -253,6 +290,10 @@ inline void AdvancedOutput::UpdateRecordingSettings()
 {
 	OBSData settings = GetDataFromJsonFile("recordEncoder.json");
 	obs_encoder_update(videoRecording, settings);
+	if (videoRecordingTrack2)
+		obs_encoder_update(videoRecordingTrack2, settings);
+	if (videoRecordingTrack3)
+		obs_encoder_update(videoRecordingTrack3, settings);
 }
 
 void AdvancedOutput::Update()
@@ -320,11 +361,14 @@ inline void AdvancedOutput::SetupRecording()
 	const char *rescaleRes = config_get_string(main->Config(), "AdvOut", "RecRescaleRes");
 	int rescaleFilter = config_get_int(main->Config(), "AdvOut", "RecRescaleFilter");
 	int tracks;
+	int videoTracks = config_get_int(main->Config(), "AdvOut", "RecVideoTracks");
 
 	const char *recFormat = config_get_string(main->Config(), "AdvOut", "RecFormat2");
 
 	bool is_fragmented = strncmp(recFormat, "fragmented", 10) == 0;
 	bool flv = strcmp(recFormat, "flv") == 0;
+	bool mkv = strcmp(recFormat, "mkv") == 0;
+	bool allowMultiVideo = mkv && !ffmpegOutput && !useStreamEncoder;
 
 	if (flv)
 		tracks = config_get_int(main->Config(), "AdvOut", "FLVTrack");
@@ -344,9 +388,14 @@ inline void AdvancedOutput::SetupRecording()
 		tracks = config_get_int(main->Config(), "AdvOut", "TrackIndex");
 
 	if (useStreamEncoder) {
-		obs_output_set_video_encoder(fileOutput, videoStreaming);
-		if (replayBuffer)
-			obs_output_set_video_encoder(replayBuffer, videoStreaming);
+		obs_output_set_video_encoder2(fileOutput, videoStreaming, 0);
+		for (size_t i = 1; i < MAX_OUTPUT_VIDEO_ENCODERS; i++)
+			obs_output_set_video_encoder2(fileOutput, nullptr, i);
+		if (replayBuffer) {
+			obs_output_set_video_encoder2(replayBuffer, videoStreaming, 0);
+			for (size_t i = 1; i < MAX_OUTPUT_VIDEO_ENCODERS; i++)
+				obs_output_set_video_encoder2(replayBuffer, nullptr, i);
+		}
 	} else {
 		if (rescaleFilter != OBS_SCALE_DISABLE && rescaleRes && *rescaleRes) {
 			if (sscanf(rescaleRes, "%ux%u", &cx, &cy) != 2) {
@@ -357,9 +406,65 @@ inline void AdvancedOutput::SetupRecording()
 
 		obs_encoder_set_scaled_size(videoRecording, cx, cy);
 		obs_encoder_set_gpu_scale_type(videoRecording, (obs_scale_type)rescaleFilter);
-		obs_output_set_video_encoder(fileOutput, videoRecording);
-		if (replayBuffer)
-			obs_output_set_video_encoder(replayBuffer, videoRecording);
+		obs_output_set_video_encoder2(fileOutput, videoRecording, 0);
+		for (size_t i = 1; i < MAX_OUTPUT_VIDEO_ENCODERS; i++)
+			obs_output_set_video_encoder2(fileOutput, nullptr, i);
+		if (replayBuffer) {
+			obs_output_set_video_encoder2(replayBuffer, videoRecording, 0);
+			for (size_t i = 1; i < MAX_OUTPUT_VIDEO_ENCODERS; i++)
+				obs_output_set_video_encoder2(replayBuffer, nullptr, i);
+		}
+
+		size_t videoIdx = 1;
+		if (allowMultiVideo && (videoTracks & (1 << 1)) != 0 &&
+		    EnsureExtraVideoEncoder(videoRecordingTrack2, videoRecording, "advanced_video_recording_2")) {
+			OBSDataAutoRelease settings = obs_encoder_get_settings(videoRecording);
+			obs_encoder_update(videoRecordingTrack2, settings);
+
+			obs_encoder_set_scaled_size(videoRecordingTrack2, cx, cy);
+			obs_encoder_set_gpu_scale_type(videoRecordingTrack2, (obs_scale_type)rescaleFilter);
+
+			const char *scene = config_get_string(main->Config(), "AdvOut", "RecVideoTrack2Source");
+			if (scene && *scene) {
+				if (!videoTrack2Canvas)
+					videoTrack2Canvas = CreateRecordingVideoTrackCanvas("Recording Track 2");
+				if (videoTrack2Canvas) {
+					SetCanvasScene(videoTrack2Canvas, scene);
+					obs_encoder_set_video(videoRecordingTrack2, obs_canvas_get_video(videoTrack2Canvas));
+				} else {
+					obs_encoder_set_video(videoRecordingTrack2, obs_get_video());
+				}
+			} else {
+				obs_encoder_set_video(videoRecordingTrack2, obs_get_video());
+			}
+
+			obs_output_set_video_encoder2(fileOutput, videoRecordingTrack2, videoIdx++);
+		}
+
+		if (allowMultiVideo && (videoTracks & (1 << 2)) != 0 &&
+		    EnsureExtraVideoEncoder(videoRecordingTrack3, videoRecording, "advanced_video_recording_3")) {
+			OBSDataAutoRelease settings = obs_encoder_get_settings(videoRecording);
+			obs_encoder_update(videoRecordingTrack3, settings);
+
+			obs_encoder_set_scaled_size(videoRecordingTrack3, cx, cy);
+			obs_encoder_set_gpu_scale_type(videoRecordingTrack3, (obs_scale_type)rescaleFilter);
+
+			const char *scene = config_get_string(main->Config(), "AdvOut", "RecVideoTrack3Source");
+			if (scene && *scene) {
+				if (!videoTrack3Canvas)
+					videoTrack3Canvas = CreateRecordingVideoTrackCanvas("Recording Track 3");
+				if (videoTrack3Canvas) {
+					SetCanvasScene(videoTrack3Canvas, scene);
+					obs_encoder_set_video(videoRecordingTrack3, obs_canvas_get_video(videoTrack3Canvas));
+				} else {
+					obs_encoder_set_video(videoRecordingTrack3, obs_get_video());
+				}
+			} else {
+				obs_encoder_set_video(videoRecordingTrack3, obs_get_video());
+			}
+
+			obs_output_set_video_encoder2(fileOutput, videoRecordingTrack3, videoIdx++);
+		}
 	}
 
 	if (!flv) {
@@ -391,6 +496,35 @@ inline void AdvancedOutput::SetupRecording()
 			blog(LOG_WARNING, "User enabled fragmented recording, "
 					  "but custom muxer settings contained movflags.");
 		obs_data_set_string(settings, "muxer_settings", mux);
+	}
+
+	if (!ffmpegOutput) {
+		OBSDataArrayAutoRelease video_names = obs_data_array_create();
+
+		auto add_name = [&](const char *name) {
+			OBSDataAutoRelease item = obs_data_create();
+			obs_data_set_string(item, "name", name ? name : "");
+			obs_data_array_push_back(video_names, item);
+		};
+
+		const auto programName = QTStr("StudioMode.Program").toUtf8();
+		add_name(programName.constData());
+
+		if (allowMultiVideo && (videoTracks & (1 << 1)) != 0) {
+			const char *name = config_get_string(main->Config(), "AdvOut", "RecVideoTrack2Name");
+			if (!name || !*name)
+				name = config_get_string(main->Config(), "AdvOut", "RecVideoTrack2Source");
+			add_name(name && *name ? name : programName.constData());
+		}
+
+		if (allowMultiVideo && (videoTracks & (1 << 2)) != 0) {
+			const char *name = config_get_string(main->Config(), "AdvOut", "RecVideoTrack3Name");
+			if (!name || !*name)
+				name = config_get_string(main->Config(), "AdvOut", "RecVideoTrack3Source");
+			add_name(name && *name ? name : programName.constData());
+		}
+
+		obs_data_set_array(settings, "video_names", video_names);
 	}
 
 	obs_data_set_string(settings, "path", path);
@@ -805,6 +939,39 @@ bool AdvancedOutput::StartRecording()
 			obs_data_set_bool(settings, "split_file", true);
 			obs_data_set_int(settings, "max_time_sec", splitFileTime * 60);
 			obs_data_set_int(settings, "max_size_mb", splitFileSize);
+		}
+
+		if (!ffmpegRecording && !ffmpegOutput) {
+			const bool mkv = strcmp(recFormat, "mkv") == 0;
+			const bool allowMultiVideo = mkv && !useStreamEncoder;
+			const int videoTracks = config_get_int(main->Config(), "AdvOut", "RecVideoTracks");
+
+			OBSDataArrayAutoRelease video_names = obs_data_array_create();
+
+			auto add_name = [&](const char *name) {
+				OBSDataAutoRelease item = obs_data_create();
+				obs_data_set_string(item, "name", name ? name : "");
+				obs_data_array_push_back(video_names, item);
+			};
+
+			const auto programName = QTStr("StudioMode.Program").toUtf8();
+			add_name(programName.constData());
+
+			if (allowMultiVideo && (videoTracks & (1 << 1)) != 0) {
+				const char *name = config_get_string(main->Config(), "AdvOut", "RecVideoTrack2Name");
+				if (!name || !*name)
+					name = config_get_string(main->Config(), "AdvOut", "RecVideoTrack2Source");
+				add_name(name && *name ? name : programName.constData());
+			}
+
+			if (allowMultiVideo && (videoTracks & (1 << 2)) != 0) {
+				const char *name = config_get_string(main->Config(), "AdvOut", "RecVideoTrack3Name");
+				if (!name || !*name)
+					name = config_get_string(main->Config(), "AdvOut", "RecVideoTrack3Source");
+				add_name(name && *name ? name : programName.constData());
+			}
+
+			obs_data_set_array(settings, "video_names", video_names);
 		}
 
 		obs_output_update(fileOutput, settings);

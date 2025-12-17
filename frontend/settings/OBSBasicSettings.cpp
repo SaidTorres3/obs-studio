@@ -50,6 +50,8 @@
 
 using namespace std;
 
+static void PopulateSceneSelectionCombo(QComboBox *combo, const char *current_value);
+
 extern const char *get_simple_output_encoder(const char *encoder);
 
 extern bool restart;
@@ -414,6 +416,12 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 	HookWidget(ui->simpleOutRecTrack4,   CHECK_CHANGED,  OUTPUTS_CHANGED);
 	HookWidget(ui->simpleOutRecTrack5,   CHECK_CHANGED,  OUTPUTS_CHANGED);
 	HookWidget(ui->simpleOutRecTrack6,   CHECK_CHANGED,  OUTPUTS_CHANGED);
+	HookWidget(ui->simpleOutRecVideoTrack2Enable, CHECK_CHANGED, OUTPUTS_CHANGED);
+	HookWidget(ui->simpleOutRecVideoTrack2Source, COMBO_CHANGED, OUTPUTS_CHANGED);
+	HookWidget(ui->simpleOutRecVideoTrack2Name,   EDIT_CHANGED,  OUTPUTS_CHANGED);
+	HookWidget(ui->simpleOutRecVideoTrack3Enable, CHECK_CHANGED, OUTPUTS_CHANGED);
+	HookWidget(ui->simpleOutRecVideoTrack3Source, COMBO_CHANGED, OUTPUTS_CHANGED);
+	HookWidget(ui->simpleOutRecVideoTrack3Name,   EDIT_CHANGED,  OUTPUTS_CHANGED);
 	HookWidget(ui->simpleOutMuxCustom,   EDIT_CHANGED,   OUTPUTS_CHANGED);
 	HookWidget(ui->simpleReplayBuf,      GROUP_CHANGED,  OUTPUTS_CHANGED);
 	HookWidget(ui->simpleRBSecMax,       SCROLL_CHANGED, OUTPUTS_CHANGED);
@@ -447,6 +455,12 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 	HookWidget(ui->advOutSplitFileType,  COMBO_CHANGED,  OUTPUTS_CHANGED);
 	HookWidget(ui->advOutSplitFileTime,  SCROLL_CHANGED, OUTPUTS_CHANGED);
 	HookWidget(ui->advOutSplitFileSize,  SCROLL_CHANGED, OUTPUTS_CHANGED);
+	HookWidget(ui->advOutRecVideoTrack2Enable, CHECK_CHANGED, OUTPUTS_CHANGED);
+	HookWidget(ui->advOutRecVideoTrack2Source, COMBO_CHANGED, OUTPUTS_CHANGED);
+	HookWidget(ui->advOutRecVideoTrack2Name,   EDIT_CHANGED,  OUTPUTS_CHANGED);
+	HookWidget(ui->advOutRecVideoTrack3Enable, CHECK_CHANGED, OUTPUTS_CHANGED);
+	HookWidget(ui->advOutRecVideoTrack3Source, COMBO_CHANGED, OUTPUTS_CHANGED);
+	HookWidget(ui->advOutRecVideoTrack3Name,   EDIT_CHANGED,  OUTPUTS_CHANGED);
 	HookWidget(ui->advOutRecTrack1,      CHECK_CHANGED,  OUTPUTS_CHANGED);
 	HookWidget(ui->advOutRecTrack2,      CHECK_CHANGED,  OUTPUTS_CHANGED);
 	HookWidget(ui->advOutRecTrack3,      CHECK_CHANGED,  OUTPUTS_CHANGED);
@@ -1723,6 +1737,18 @@ void OBSBasicSettings::LoadSimpleOutputSettings()
 	ui->simpleOutRecTrack5->setChecked(tracks & (1 << 4));
 	ui->simpleOutRecTrack6->setChecked(tracks & (1 << 5));
 
+	int videoTracks = config_get_int(main->Config(), "SimpleOutput", "RecVideoTracks");
+	ui->simpleOutRecVideoTrack2Enable->setChecked(videoTracks & (1 << 1));
+	ui->simpleOutRecVideoTrack3Enable->setChecked(videoTracks & (1 << 2));
+
+	const char *videoTrack2Source = config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack2Source");
+	const char *videoTrack3Source = config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack3Source");
+	PopulateSceneSelectionCombo(ui->simpleOutRecVideoTrack2Source, videoTrack2Source);
+	PopulateSceneSelectionCombo(ui->simpleOutRecVideoTrack3Source, videoTrack3Source);
+
+	ui->simpleOutRecVideoTrack2Name->setText(config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack2Name"));
+	ui->simpleOutRecVideoTrack3Name->setText(config_get_string(main->Config(), "SimpleOutput", "RecVideoTrack3Name"));
+
 	curPreset = preset;
 	curQSVPreset = qsvPreset;
 	curNVENCPreset = nvPreset;
@@ -1963,6 +1989,18 @@ void OBSBasicSettings::LoadAdvOutputRecordingSettings()
 	ui->advOutRecTrack5->setChecked(tracks & (1 << 4));
 	ui->advOutRecTrack6->setChecked(tracks & (1 << 5));
 
+	int videoTracks = config_get_int(main->Config(), "AdvOut", "RecVideoTracks");
+	ui->advOutRecVideoTrack2Enable->setChecked(videoTracks & (1 << 1));
+	ui->advOutRecVideoTrack3Enable->setChecked(videoTracks & (1 << 2));
+
+	const char *videoTrack2Source = config_get_string(main->Config(), "AdvOut", "RecVideoTrack2Source");
+	const char *videoTrack3Source = config_get_string(main->Config(), "AdvOut", "RecVideoTrack3Source");
+	PopulateSceneSelectionCombo(ui->advOutRecVideoTrack2Source, videoTrack2Source);
+	PopulateSceneSelectionCombo(ui->advOutRecVideoTrack3Source, videoTrack3Source);
+
+	ui->advOutRecVideoTrack2Name->setText(config_get_string(main->Config(), "AdvOut", "RecVideoTrack2Name"));
+	ui->advOutRecVideoTrack3Name->setText(config_get_string(main->Config(), "AdvOut", "RecVideoTrack3Name"));
+
 	if (astrcmpi(splitFileType, "Size") == 0)
 		idx = 1;
 	else if (astrcmpi(splitFileType, "Manual") == 0)
@@ -2202,6 +2240,7 @@ void OBSBasicSettings::LoadOutputSettings()
 	}
 
 	loading = false;
+	UpdateRecordingVideoTracksUI();
 }
 
 void OBSBasicSettings::SetAdvOutputFFmpegEnablement(FFmpegCodecType encoderType, bool enabled, bool enableEncoder)
@@ -3384,6 +3423,11 @@ void OBSBasicSettings::SaveOutputSettings()
 	SaveSpinBox(ui->simpleRBSecMax, "SimpleOutput", "RecRBTime");
 	SaveSpinBox(ui->simpleRBMegsMax, "SimpleOutput", "RecRBSize");
 	config_set_int(main->Config(), "SimpleOutput", "RecTracks", SimpleOutGetSelectedAudioTracks());
+	config_set_int(main->Config(), "SimpleOutput", "RecVideoTracks", SimpleOutGetSelectedVideoTracks());
+	SaveComboData(ui->simpleOutRecVideoTrack2Source, "SimpleOutput", "RecVideoTrack2Source");
+	SaveEdit(ui->simpleOutRecVideoTrack2Name, "SimpleOutput", "RecVideoTrack2Name");
+	SaveComboData(ui->simpleOutRecVideoTrack3Source, "SimpleOutput", "RecVideoTrack3Source");
+	SaveEdit(ui->simpleOutRecVideoTrack3Name, "SimpleOutput", "RecVideoTrack3Name");
 
 	curAdvStreamEncoder = GetComboData(ui->advOutEncoder);
 
@@ -3413,6 +3457,11 @@ void OBSBasicSettings::SaveOutputSettings()
 	SaveSpinBox(ui->advOutSplitFileSize, "AdvOut", "RecSplitFileSize");
 
 	config_set_int(main->Config(), "AdvOut", "RecTracks", AdvOutGetSelectedAudioTracks());
+	config_set_int(main->Config(), "AdvOut", "RecVideoTracks", AdvOutGetSelectedVideoTracks());
+	SaveComboData(ui->advOutRecVideoTrack2Source, "AdvOut", "RecVideoTrack2Source");
+	SaveEdit(ui->advOutRecVideoTrack2Name, "AdvOut", "RecVideoTrack2Name");
+	SaveComboData(ui->advOutRecVideoTrack3Source, "AdvOut", "RecVideoTrack3Source");
+	SaveEdit(ui->advOutRecVideoTrack3Name, "AdvOut", "RecVideoTrack3Name");
 
 	config_set_int(main->Config(), "AdvOut", "FLVTrack", CurrentFLVTrack());
 
@@ -4123,7 +4172,33 @@ void OBSBasicSettings::OutputsChanged()
 		EnableApplyButton(true);
 
 		UpdateMultitrackVideo();
+		UpdateRecordingVideoTracksUI();
 	}
+}
+
+void OBSBasicSettings::UpdateRecordingVideoTracksUI()
+{
+	const bool toggle_available = !main->Active();
+
+	const QString simple_format = ui->simpleOutRecFormat->currentData().toString();
+	const QString simple_quality = ui->simpleOutRecQuality->currentData().toString();
+	const bool simple_allowed =
+		toggle_available && (simple_format == "mkv") && (simple_quality != "Stream") && (simple_quality != "Lossless");
+
+	ui->simpleOutRecVideoTrack2Enable->setEnabled(simple_allowed);
+	ui->simpleOutRecVideoTrack3Enable->setEnabled(simple_allowed);
+	ui->simpleOutRecVideoTrack2Controls->setEnabled(simple_allowed && ui->simpleOutRecVideoTrack2Enable->isChecked());
+	ui->simpleOutRecVideoTrack3Controls->setEnabled(simple_allowed && ui->simpleOutRecVideoTrack3Enable->isChecked());
+
+	const QString adv_format = ui->advOutRecFormat->currentData().toString();
+	const bool adv_standard = ui->advOutRecType->currentIndex() == 0;
+	const bool adv_use_stream_encoder = ui->advOutRecEncoder->currentIndex() == 0;
+	const bool adv_allowed = toggle_available && adv_standard && (adv_format == "mkv") && !adv_use_stream_encoder;
+
+	ui->advOutRecVideoTrack2Enable->setEnabled(adv_allowed);
+	ui->advOutRecVideoTrack3Enable->setEnabled(adv_allowed);
+	ui->advOutRecVideoTrack2Controls->setEnabled(adv_allowed && ui->advOutRecVideoTrack2Enable->isChecked());
+	ui->advOutRecVideoTrack3Controls->setEnabled(adv_allowed && ui->advOutRecVideoTrack3Enable->isChecked());
 }
 
 void OBSBasicSettings::AudioChanged()
@@ -5165,6 +5240,33 @@ static void DisableIncompatibleSimpleContainer(QComboBox *cbox, const QString &c
 		cbox->setCurrentIndex(-1);
 }
 
+static void PopulateSceneSelectionCombo(QComboBox *combo, const char *current_value)
+{
+	const QString current = QT_UTF8(current_value ? current_value : "");
+
+	combo->blockSignals(true);
+	combo->clear();
+
+	combo->addItem(QTStr("StudioMode.Program"), QString(""));
+
+	obs_frontend_source_list scenes = {};
+	obs_frontend_get_scenes(&scenes);
+
+	for (size_t i = 0; i < scenes.sources.num; i++) {
+		obs_source_t *source = scenes.sources.array[i];
+		const char *name = obs_source_get_name(source);
+		combo->addItem(QT_UTF8(name), QT_UTF8(name));
+	}
+
+	obs_frontend_source_list_free(&scenes);
+
+	int idx = combo->findData(current);
+	if (idx == -1)
+		idx = 0;
+	combo->setCurrentIndex(idx);
+	combo->blockSignals(false);
+}
+
 void OBSBasicSettings::SimpleRecordingEncoderChanged()
 {
 	QString qual = ui->simpleOutRecQuality->currentData().toString();
@@ -5525,12 +5627,28 @@ int OBSBasicSettings::SimpleOutGetSelectedAudioTracks()
 	return tracks;
 }
 
+int OBSBasicSettings::SimpleOutGetSelectedVideoTracks()
+{
+	int tracks = (1 << 0);
+	tracks |= ui->simpleOutRecVideoTrack2Enable->isChecked() ? (1 << 1) : 0;
+	tracks |= ui->simpleOutRecVideoTrack3Enable->isChecked() ? (1 << 2) : 0;
+	return tracks;
+}
+
 int OBSBasicSettings::AdvOutGetSelectedAudioTracks()
 {
 	int tracks =
 		(ui->advOutRecTrack1->isChecked() ? (1 << 0) : 0) | (ui->advOutRecTrack2->isChecked() ? (1 << 1) : 0) |
 		(ui->advOutRecTrack3->isChecked() ? (1 << 2) : 0) | (ui->advOutRecTrack4->isChecked() ? (1 << 3) : 0) |
 		(ui->advOutRecTrack5->isChecked() ? (1 << 4) : 0) | (ui->advOutRecTrack6->isChecked() ? (1 << 5) : 0);
+	return tracks;
+}
+
+int OBSBasicSettings::AdvOutGetSelectedVideoTracks()
+{
+	int tracks = (1 << 0);
+	tracks |= ui->advOutRecVideoTrack2Enable->isChecked() ? (1 << 1) : 0;
+	tracks |= ui->advOutRecVideoTrack3Enable->isChecked() ? (1 << 2) : 0;
 	return tracks;
 }
 

@@ -131,7 +131,8 @@ bool active(struct ffmpeg_muxer *stream)
 	return os_atomic_load_bool(&stream->active);
 }
 
-static void add_video_encoder_params(struct ffmpeg_muxer *stream, os_process_args_t *args, obs_encoder_t *vencoder)
+static void add_video_encoder_params(struct ffmpeg_muxer *stream, os_process_args_t *args, obs_encoder_t *vencoder,
+				     const char *track_name)
 {
 	obs_data_t *settings = obs_encoder_get_settings(vencoder);
 	int bitrate = (int)obs_data_get_int(settings, "bitrate");
@@ -184,6 +185,7 @@ static void add_video_encoder_params(struct ffmpeg_muxer *stream, os_process_arg
 	const int max_luminance = (trc == AVCOL_TRC_SMPTE2084) ? (int)obs_get_video_hdr_nominal_peak_level()
 							       : ((trc == AVCOL_TRC_ARIB_STD_B67) ? 1000 : 0);
 
+	os_process_args_add_arg(args, track_name ? track_name : "");
 	os_process_args_add_arg(args, obs_encoder_get_codec(vencoder));
 	os_process_args_add_argf(args, "%d", bitrate);
 	os_process_args_add_argf(args, "%d", obs_output_get_width(stream->output));
@@ -240,6 +242,30 @@ static void log_muxer_params(struct ffmpeg_muxer *stream, const char *settings)
 	av_dict_free(&dict);
 }
 
+static obs_data_array_t *get_video_names(struct ffmpeg_muxer *stream)
+{
+	obs_data_t *settings = obs_output_get_settings(stream->output);
+	obs_data_array_t *video_names = obs_data_get_array(settings, "video_names");
+	obs_data_release(settings);
+	return video_names;
+}
+
+static const char *get_track_name(obs_data_array_t *video_names, size_t idx)
+{
+	const char *name = "";
+
+	if (!video_names)
+		return name;
+
+	obs_data_t *item = obs_data_array_item(video_names, idx);
+	if (item) {
+		name = obs_data_get_string(item, "name");
+		obs_data_release(item);
+	}
+
+	return name;
+}
+
 static void add_stream_key(os_process_args_t *args, struct ffmpeg_muxer *stream)
 {
 	os_process_args_add_arg(args, dstr_is_empty(&stream->stream_key) ? "" : stream->stream_key.array);
@@ -265,9 +291,20 @@ static void add_muxer_params(os_process_args_t *args, struct ffmpeg_muxer *strea
 
 static void build_command_line(struct ffmpeg_muxer *stream, os_process_args_t **args, const char *path)
 {
-	obs_encoder_t *vencoder = obs_output_get_video_encoder(stream->output);
+	obs_encoder_t *vencoders[MAX_OUTPUT_VIDEO_ENCODERS];
 	obs_encoder_t *aencoders[MAX_AUDIO_MIXES];
+	obs_data_array_t *video_names = NULL;
+	int num_video_tracks = 0;
 	int num_tracks = 0;
+
+	for (;;) {
+		obs_encoder_t *vencoder = obs_output_get_video_encoder2(stream->output, num_video_tracks);
+		if (!vencoder)
+			break;
+
+		vencoders[num_video_tracks] = vencoder;
+		num_video_tracks++;
+	}
 
 	for (;;) {
 		obs_encoder_t *aencoder = obs_output_get_audio_encoder(stream->output, num_tracks);
@@ -284,11 +321,15 @@ static void build_command_line(struct ffmpeg_muxer *stream, os_process_args_t **
 
 	dstr_copy(&stream->path, path);
 	os_process_args_add_arg(*args, path);
-	os_process_args_add_argf(*args, "%d", vencoder ? 1 : 0);
+	os_process_args_add_argf(*args, "%d", num_video_tracks);
 	os_process_args_add_argf(*args, "%d", num_tracks);
 
-	if (vencoder)
-		add_video_encoder_params(stream, *args, vencoder);
+	if (num_video_tracks) {
+		video_names = get_video_names(stream);
+
+		for (int i = 0; i < num_video_tracks; i++)
+			add_video_encoder_params(stream, *args, vencoders[i], get_track_name(video_names, i));
+	}
 
 	if (num_tracks) {
 		os_process_args_add_arg(*args, obs_encoder_get_codec(aencoders[0]));
@@ -300,6 +341,8 @@ static void build_command_line(struct ffmpeg_muxer *stream, os_process_args_t **
 
 	add_stream_key(*args, stream);
 	add_muxer_params(*args, stream);
+
+	obs_data_array_release(video_names);
 }
 
 void start_pipe(struct ffmpeg_muxer *stream, const char *path)
@@ -331,8 +374,10 @@ static void set_file_not_readable_error(struct ffmpeg_muxer *stream, obs_data_t 
 
 inline static void ts_offset_clear(struct ffmpeg_muxer *stream)
 {
-	stream->found_video = false;
-	stream->video_pts_offset = 0;
+	for (size_t i = 0; i < MAX_OUTPUT_VIDEO_ENCODERS; i++) {
+		stream->found_video[i] = false;
+		stream->video_pts_offsets[i] = 0;
+	}
 
 	for (size_t i = 0; i < MAX_AUDIO_MIXES; i++) {
 		stream->found_audio[i] = false;
@@ -348,9 +393,11 @@ static inline int64_t packet_pts_usec(struct encoder_packet *packet)
 inline static void ts_offset_update(struct ffmpeg_muxer *stream, struct encoder_packet *packet)
 {
 	if (packet->type == OBS_ENCODER_VIDEO) {
-		if (!stream->found_video) {
-			stream->video_pts_offset = packet->pts;
-			stream->found_video = true;
+		if (packet->track_idx < MAX_OUTPUT_VIDEO_ENCODERS && !stream->found_video[packet->track_idx]) {
+			stream->video_pts_offsets[packet->track_idx] = packet->pts;
+			stream->found_video[packet->track_idx] = true;
+		} else if (packet->track_idx >= MAX_OUTPUT_VIDEO_ENCODERS) {
+			blog(LOG_WARNING, "Invalid video track index %u", packet->track_idx);
 		}
 		return;
 	}
@@ -364,15 +411,20 @@ inline static void ts_offset_update(struct ffmpeg_muxer *stream, struct encoder_
 
 static inline void update_encoder_settings(struct ffmpeg_muxer *stream, const char *path)
 {
-	obs_encoder_t *vencoder = obs_output_get_video_encoder(stream->output);
 	const char *ext = strrchr(path, '.');
 
 	/* if using m3u8, repeat headers */
 	if (ext && strcmp(ext, ".m3u8") == 0) {
-		obs_data_t *settings = obs_encoder_get_settings(vencoder);
-		obs_data_set_bool(settings, "repeat_headers", true);
-		obs_encoder_update(vencoder, settings);
-		obs_data_release(settings);
+		for (size_t idx = 0; idx < MAX_OUTPUT_VIDEO_ENCODERS; idx++) {
+			obs_encoder_t *vencoder = obs_output_get_video_encoder2(stream->output, idx);
+			if (!vencoder)
+				break;
+
+			obs_data_t *settings = obs_encoder_get_settings(vencoder);
+			obs_data_set_bool(settings, "repeat_headers", true);
+			obs_encoder_update(vencoder, settings);
+			obs_data_release(settings);
+		}
 	}
 }
 
@@ -614,8 +666,12 @@ bool write_packet(struct ffmpeg_muxer *stream, struct encoder_packet *packet)
 
 	if (stream->split_file) {
 		if (is_video) {
-			info.dts -= stream->video_pts_offset;
-			info.pts -= stream->video_pts_offset;
+			if (info.index >= MAX_OUTPUT_VIDEO_ENCODERS) {
+				blog(LOG_WARNING, "Invalid video track index %d", info.index);
+				return false;
+			}
+			info.dts -= stream->video_pts_offsets[info.index];
+			info.pts -= stream->video_pts_offsets[info.index];
 		} else {
 			info.dts -= stream->audio_dts_offsets[info.index];
 			info.pts -= stream->audio_dts_offsets[info.index];
@@ -653,11 +709,9 @@ static bool send_audio_headers(struct ffmpeg_muxer *stream, obs_encoder_t *aenco
 	return write_packet(stream, &packet);
 }
 
-static bool send_video_headers(struct ffmpeg_muxer *stream)
+static bool send_video_headers(struct ffmpeg_muxer *stream, obs_encoder_t *vencoder, size_t idx)
 {
-	obs_encoder_t *vencoder = obs_output_get_video_encoder(stream->output);
-
-	struct encoder_packet packet = {.type = OBS_ENCODER_VIDEO, .timebase_den = 1};
+	struct encoder_packet packet = {.type = OBS_ENCODER_VIDEO, .timebase_den = 1, .track_idx = idx};
 
 	if (!obs_encoder_get_extra_data(vencoder, &packet.data, &packet.size))
 		return false;
@@ -667,11 +721,20 @@ static bool send_video_headers(struct ffmpeg_muxer *stream)
 bool send_headers(struct ffmpeg_muxer *stream)
 {
 	obs_encoder_t *aencoder;
+	obs_encoder_t *vencoder;
 	size_t idx = 0;
 
-	if (!send_video_headers(stream))
-		return false;
+	for (;;) {
+		vencoder = obs_output_get_video_encoder2(stream->output, idx);
+		if (!vencoder)
+			break;
 
+		if (!send_video_headers(stream, vencoder, idx))
+			return false;
+		idx++;
+	}
+
+	idx = 0;
 	do {
 		aencoder = obs_output_get_audio_encoder(stream->output, idx);
 		if (aencoder) {
@@ -688,7 +751,7 @@ bool send_headers(struct ffmpeg_muxer *stream)
 static inline bool should_split(struct ffmpeg_muxer *stream, struct encoder_packet *packet)
 {
 	/* split at video frame */
-	if (packet->type != OBS_ENCODER_VIDEO)
+	if (packet->type != OBS_ENCODER_VIDEO || packet->track_idx != 0)
 		return false;
 
 	/* don't split group of pictures */
@@ -924,7 +987,7 @@ static void replay_buffer_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hot
 	struct ffmpeg_muxer *stream = data;
 
 	if (os_atomic_load_bool(&stream->active)) {
-		obs_encoder_t *vencoder = obs_output_get_video_encoder(stream->output);
+		obs_encoder_t *vencoder = obs_output_get_video_encoder2(stream->output, 0);
 		if (obs_encoder_paused(vencoder)) {
 			info("Could not save buffer because encoders paused");
 			return;

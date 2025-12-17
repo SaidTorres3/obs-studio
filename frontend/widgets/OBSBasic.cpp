@@ -733,6 +733,11 @@ bool OBSBasic::InitBasicConfigDefaults()
 	config_set_default_string(activeConfiguration, "SimpleOutput", "StreamAudioEncoder", "aac");
 	config_set_default_string(activeConfiguration, "SimpleOutput", "RecAudioEncoder", "aac");
 	config_set_default_uint(activeConfiguration, "SimpleOutput", "RecTracks", (1 << 0));
+	config_set_default_uint(activeConfiguration, "SimpleOutput", "RecVideoTracks", (1 << 0));
+	config_set_default_string(activeConfiguration, "SimpleOutput", "RecVideoTrack2Source", "");
+	config_set_default_string(activeConfiguration, "SimpleOutput", "RecVideoTrack2Name", "");
+	config_set_default_string(activeConfiguration, "SimpleOutput", "RecVideoTrack3Source", "");
+	config_set_default_string(activeConfiguration, "SimpleOutput", "RecVideoTrack3Name", "");
 
 	config_set_default_bool(activeConfiguration, "AdvOut", "ApplyServiceSettings", true);
 	config_set_default_bool(activeConfiguration, "AdvOut", "UseRescale", false);
@@ -746,6 +751,11 @@ bool OBSBasic::InitBasicConfigDefaults()
 	config_set_default_string(activeConfiguration, "AdvOut", "RecFormat2", DEFAULT_CONTAINER);
 	config_set_default_bool(activeConfiguration, "AdvOut", "RecUseRescale", false);
 	config_set_default_uint(activeConfiguration, "AdvOut", "RecTracks", (1 << 0));
+	config_set_default_uint(activeConfiguration, "AdvOut", "RecVideoTracks", (1 << 0));
+	config_set_default_string(activeConfiguration, "AdvOut", "RecVideoTrack2Source", "");
+	config_set_default_string(activeConfiguration, "AdvOut", "RecVideoTrack2Name", "");
+	config_set_default_string(activeConfiguration, "AdvOut", "RecVideoTrack3Source", "");
+	config_set_default_string(activeConfiguration, "AdvOut", "RecVideoTrack3Name", "");
 	config_set_default_string(activeConfiguration, "AdvOut", "RecEncoder", "none");
 	config_set_default_uint(activeConfiguration, "AdvOut", "FLVTrack", 1);
 	config_set_default_uint(activeConfiguration, "AdvOut", "StreamMultiTrackAudioMixes", 1);
