@@ -65,6 +65,9 @@
 #include <string>
 #include <unordered_set>
 
+#include <algorithm>
+#include <cmath>
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include "Windows.h"
@@ -73,6 +76,233 @@
 #include "moc_OBSBasic.cpp"
 
 using namespace std;
+
+class BlackScreenDetector {
+public:
+	explicit BlackScreenDetector(OBSBasic *main_) : main(main_)
+	{
+		obs_add_tick_callback(BlackScreenDetector::Tick, this);
+	}
+
+	~BlackScreenDetector()
+	{
+		obs_remove_tick_callback(BlackScreenDetector::Tick, this);
+
+		obs_enter_graphics();
+		gs_stagesurface_destroy(stagesurf);
+		obs_leave_graphics();
+	}
+
+private:
+	static constexpr float kSampleIntervalSec = 1.0f;
+	static constexpr int kDefaultTriggerSeconds = 10;
+	static constexpr int kDefaultSensitivity = 3; // roughly matches old default threshold=8
+	static constexpr uint8_t kMaxThresholdForSensitivity20 = 102; // ~40% brightness ("60% black")
+
+	QPointer<OBSBasic> main;
+	gs_stagesurf_t *stagesurf = nullptr;
+	uint32_t stageW = 0;
+	uint32_t stageH = 0;
+
+	float accum = 0.0f;
+	int consecutiveBlackSeconds = 0;
+	bool alertShown = false;
+	int triggerSeconds = kDefaultTriggerSeconds;
+	int sensitivity = kDefaultSensitivity;
+	uint8_t blackThreshold = 0;
+	float requiredBlackRatio = 1.0f;
+	bool enabled = true;
+
+	static void Tick(void *param, float seconds)
+	{
+		auto *self = static_cast<BlackScreenDetector *>(param);
+		if (!self || !self->main)
+			return;
+
+		self->LoadConfig();
+		if (!self->enabled) {
+			self->consecutiveBlackSeconds = 0;
+			self->alertShown = false;
+			self->accum = 0.0f;
+			return;
+		}
+
+		if (!(self->main->StreamingActive() || self->main->RecordingActive() || self->main->ReplayBufferActive())) {
+			self->consecutiveBlackSeconds = 0;
+			self->alertShown = false;
+			self->accum = 0.0f;
+			return;
+		}
+
+		self->accum += seconds;
+		if (self->accum < kSampleIntervalSec)
+			return;
+
+		// Keep remainder to avoid drift.
+		self->accum -= kSampleIntervalSec;
+		if (self->accum > 5.0f)
+			self->accum = 0.0f;
+
+		bool isBlack = false;
+		obs_enter_graphics();
+		isBlack = self->SampleIsBlack();
+		obs_leave_graphics();
+
+		self->OnSample(isBlack);
+	}
+
+	bool EnsureResources()
+	{
+		// Resources are created lazily once we know the main texture size.
+		return true;
+	}
+
+	bool SampleIsBlack()
+	{
+		if (!EnsureResources())
+			return false;
+
+		gs_texture_t *tex = obs_get_main_texture();
+		if (!tex)
+			return false;
+
+		const uint32_t w = gs_texture_get_width(tex);
+		const uint32_t h = gs_texture_get_height(tex);
+		if (!w || !h)
+			return false;
+
+		if (!stagesurf || stageW != w || stageH != h) {
+			gs_stagesurface_destroy(stagesurf);
+			stagesurf = gs_stagesurface_create(w, h, GS_BGRA);
+			stageW = w;
+			stageH = h;
+			if (!stagesurf)
+				return false;
+		}
+
+		gs_stage_texture(stagesurf, tex);
+
+		uint8_t *videoData = nullptr;
+		uint32_t videoLinesize = 0;
+		if (!gs_stagesurface_map(stagesurf, &videoData, &videoLinesize))
+			return false;
+
+		const bool strictAllBlack = requiredBlackRatio >= 0.999f;
+
+		uint64_t totalSamples = 0;
+		uint64_t blackSamples = 0;
+
+		// Strict mode (sensitivity=1): scan everything and early-exit on any non-black.
+		// Other modes: sample a grid so a tiny logo doesn't prevent triggering.
+		uint32_t step = 1;
+		if (!strictAllBlack) {
+			static constexpr uint64_t kMaxSamples = 200000; // per-sample-pass cap
+			const double pixels = double(stageW) * double(stageH);
+			if (pixels > double(kMaxSamples)) {
+				const double idealStep = std::sqrt(pixels / double(kMaxSamples));
+				step = (uint32_t)std::clamp<int>((int)std::ceil(idealStep), 1, 256);
+			}
+		}
+
+		bool anyNonBlack = false;
+		for (uint32_t y = 0; y < stageH; y += step) {
+			const uint8_t *line = videoData + (uint64_t(y) * uint64_t(videoLinesize));
+			for (uint32_t x = 0; x < stageW; x += step) {
+				// BGRA
+				const uint8_t b = line[x * 4 + 0];
+				const uint8_t g = line[x * 4 + 1];
+				const uint8_t r = line[x * 4 + 2];
+				const bool isBlack = (r <= blackThreshold && g <= blackThreshold && b <= blackThreshold);
+
+				totalSamples++;
+				if (isBlack) {
+					blackSamples++;
+				} else if (strictAllBlack) {
+					anyNonBlack = true;
+					break;
+				}
+			}
+			if (anyNonBlack)
+				break;
+		}
+
+		const bool isBlackFrame = strictAllBlack
+			? !anyNonBlack
+			: (totalSamples > 0 && (double)blackSamples / (double)totalSamples >= (double)requiredBlackRatio);
+
+		gs_stagesurface_unmap(stagesurf);
+		return isBlackFrame;
+	}
+
+	void OnSample(bool isBlack)
+	{
+		if (isBlack) {
+			consecutiveBlackSeconds++;
+			if (!alertShown && consecutiveBlackSeconds >= triggerSeconds) {
+				alertShown = true;
+				QMetaObject::invokeMethod(main, [this]() {
+					if (!main)
+						return;
+					const QString msg = QStringLiteral("WARNING: BLACK SCREEN!!!");
+					auto *box = new QMessageBox(QMessageBox::Critical, msg, msg, QMessageBox::Ok, main);
+					box->setAttribute(Qt::WA_DeleteOnClose);
+					box->setWindowModality(Qt::ApplicationModal);
+					box->setWindowFlag(Qt::WindowStaysOnTopHint, true);
+					QFont f = box->font();
+					f.setPointSizeF((std::max)(12.0, f.pointSizeF() * 1.6));
+					f.setBold(true);
+					box->setFont(f);
+					box->show();
+					box->raise();
+					box->activateWindow();
+					QApplication::alert(box, 0);
+				}, Qt::QueuedConnection);
+			}
+		} else {
+			consecutiveBlackSeconds = 0;
+			alertShown = false;
+		}
+	}
+
+	void LoadConfig()
+	{
+		config_t *cfg = App()->GetUserConfig();
+		if (!cfg)
+			return;
+
+		enabled = config_get_bool(cfg, "General", "BlackScreenWarningEnabled");
+		int64_t seconds = config_get_int(cfg, "General", "BlackScreenWarningSeconds");
+
+		int64_t sens = (int64_t)kDefaultSensitivity;
+		if (config_has_user_value(cfg, "General", "BlackScreenWarningSensitivity")) {
+			sens = config_get_int(cfg, "General", "BlackScreenWarningSensitivity");
+		} else {
+			// Backward compatibility: map old 0..255 threshold to 1..20 sensitivity.
+			int64_t oldThreshold = config_get_int(cfg, "General", "BlackScreenWarningThreshold");
+			oldThreshold = std::clamp<int64_t>(oldThreshold, 0, 255);
+			// Convert 0..kMaxThresholdForSensitivity20 range into 1..20.
+			const int64_t capped = std::min<int64_t>(oldThreshold, kMaxThresholdForSensitivity20);
+			sens = 1 + (capped * 19 + (kMaxThresholdForSensitivity20 / 2)) / kMaxThresholdForSensitivity20;
+		}
+
+		if (seconds <= 0)
+			seconds = kDefaultTriggerSeconds;
+		if (seconds > 3600)
+			seconds = 3600;
+
+		sens = std::clamp<int64_t>(sens, 1, 20);
+
+		triggerSeconds = (int)seconds;
+		sensitivity = (int)sens;
+		// Pixel black threshold: sensitivity 1..20 -> threshold 0..kMaxThresholdForSensitivity20
+		const int s0 = sensitivity - 1;
+		blackThreshold = (uint8_t)((s0 * kMaxThresholdForSensitivity20 + 9) / 19);
+
+		// Coverage requirement: sensitivity 1 => 100% black required, 20 => 60% black required
+		const float t = float(s0) / 19.0f;
+		requiredBlackRatio = std::clamp(1.0f - (t * 0.4f), 0.6f, 1.0f);
+	}
+};
 
 extern bool portable_mode;
 extern bool disable_3p_plugins;
@@ -1362,6 +1592,9 @@ void OBSBasic::OnFirstLoad()
 {
 	OnEvent(OBS_FRONTEND_EVENT_FINISHED_LOADING);
 
+	if (!blackScreenDetector)
+		blackScreenDetector = new BlackScreenDetector(this);
+
 #ifdef WHATSNEW_ENABLED
 	/* Attempt to load init screen if available */
 	if (cef) {
@@ -1390,6 +1623,9 @@ OBSBasic::~OBSBasic()
 
 void OBSBasic::applicationShutdown() noexcept
 {
+	delete blackScreenDetector;
+	blackScreenDetector = nullptr;
+
 	/* clear out UI event queue */
 	QApplication::sendPostedEvents(nullptr);
 	QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);

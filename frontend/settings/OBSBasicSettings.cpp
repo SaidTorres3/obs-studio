@@ -38,6 +38,8 @@
 #include <widgets/OBSBasic.hpp>
 #include <widgets/OBSProjector.hpp>
 
+#include <algorithm>
+
 #include <properties-view.hpp>
 #include <qt-wrappers.hpp>
 
@@ -336,6 +338,9 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 	HookWidget(ui->updateChannelBox,     COMBO_CHANGED,  GENERAL_CHANGED);
 	HookWidget(ui->enableAutoUpdates,    CHECK_CHANGED,  GENERAL_CHANGED);
 	HookWidget(ui->openStatsOnStartup,   CHECK_CHANGED,  GENERAL_CHANGED);
+	HookWidget(ui->enableBlackScreenWarning, CHECK_CHANGED,  GENERAL_CHANGED);
+	HookWidget(ui->blackScreenSeconds,       SCROLL_CHANGED, GENERAL_CHANGED);
+	HookWidget(ui->blackScreenThreshold,     SCROLL_CHANGED, GENERAL_CHANGED);
 	HookWidget(ui->hideOBSFromCapture,   CHECK_CHANGED,  GENERAL_CHANGED);
 	HookWidget(ui->warnBeforeStreamStart,CHECK_CHANGED,  GENERAL_CHANGED);
 	HookWidget(ui->warnBeforeStreamStop, CHECK_CHANGED,  GENERAL_CHANGED);
@@ -1250,6 +1255,10 @@ void OBSBasicSettings::LoadGeneralSettings()
 {
 	loading = true;
 
+	config_set_default_bool(App()->GetUserConfig(), "General", "BlackScreenWarningEnabled", true);
+	config_set_default_int(App()->GetUserConfig(), "General", "BlackScreenWarningSeconds", 10);
+	config_set_default_int(App()->GetUserConfig(), "General", "BlackScreenWarningSensitivity", 3);
+
 	LoadLanguageList();
 
 #if defined(_WIN32) || defined(ENABLE_SPARKLE_UPDATER)
@@ -1260,6 +1269,33 @@ void OBSBasicSettings::LoadGeneralSettings()
 #endif
 	bool openStatsOnStartup = config_get_bool(main->Config(), "General", "OpenStatsOnStartup");
 	ui->openStatsOnStartup->setChecked(openStatsOnStartup);
+
+	if (ui->enableBlackScreenWarning) {
+		const bool enabled = config_get_bool(App()->GetUserConfig(), "General", "BlackScreenWarningEnabled");
+		const int seconds = (int)config_get_int(App()->GetUserConfig(), "General", "BlackScreenWarningSeconds");
+
+		int sensitivity = 3;
+		if (config_has_user_value(App()->GetUserConfig(), "General", "BlackScreenWarningSensitivity")) {
+			sensitivity = (int)config_get_int(App()->GetUserConfig(), "General", "BlackScreenWarningSensitivity");
+		} else {
+			// Backward compat: map old 0..255 threshold into 1..20 sensitivity.
+			const int oldThreshold = (int)config_get_int(App()->GetUserConfig(), "General", "BlackScreenWarningThreshold");
+			const int capped = std::clamp(oldThreshold, 0, 102);
+			sensitivity = 1 + (capped * 19 + 51) / 102;
+		}
+
+		ui->enableBlackScreenWarning->setChecked(enabled);
+		ui->blackScreenSeconds->setValue(std::clamp(seconds, 1, 3600));
+		ui->blackScreenThreshold->setValue(std::clamp(sensitivity, 1, 20));
+
+		ui->blackScreenSeconds->setEnabled(enabled);
+		ui->blackScreenThreshold->setEnabled(enabled);
+
+		connect(ui->enableBlackScreenWarning, &QCheckBox::toggled, ui->blackScreenSeconds, &QWidget::setEnabled,
+			Qt::UniqueConnection);
+		connect(ui->enableBlackScreenWarning, &QCheckBox::toggled, ui->blackScreenThreshold, &QWidget::setEnabled,
+			Qt::UniqueConnection);
+	}
 
 #if defined(_WIN32)
 	if (ui->hideOBSFromCapture) {
@@ -3005,6 +3041,18 @@ void OBSBasicSettings::SaveGeneralSettings()
 #endif
 	if (WidgetChanged(ui->openStatsOnStartup))
 		config_set_bool(main->Config(), "General", "OpenStatsOnStartup", ui->openStatsOnStartup->isChecked());
+
+	if (ui->enableBlackScreenWarning) {
+		if (WidgetChanged(ui->enableBlackScreenWarning))
+			config_set_bool(App()->GetUserConfig(), "General", "BlackScreenWarningEnabled",
+					ui->enableBlackScreenWarning->isChecked());
+		if (WidgetChanged(ui->blackScreenSeconds))
+			config_set_int(App()->GetUserConfig(), "General", "BlackScreenWarningSeconds",
+					ui->blackScreenSeconds->value());
+		if (WidgetChanged(ui->blackScreenThreshold))
+			config_set_int(App()->GetUserConfig(), "General", "BlackScreenWarningSensitivity",
+					ui->blackScreenThreshold->value());
+	}
 	if (WidgetChanged(ui->snappingEnabled))
 		config_set_bool(App()->GetUserConfig(), "BasicWindow", "SnappingEnabled",
 				ui->snappingEnabled->isChecked());
